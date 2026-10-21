@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#101624">
+<title>jamshell</title>
+<!-- jamshell 0.4.0: a starter for portrait, touch-first browser games made in jams. Apache-2.0.
+     Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude), before any jam window; it holds no gameplay.
+     A jam game replaces the DEMO block (marked below) and keeps the rest. Everything runs offline from this
+     one file: no network loads, sound and music are synthesized, art is drawn in code. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #101624; color: #eef2f8;
+    font: 16px system-ui, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none;
+    -webkit-user-select: none; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  #stage { position: fixed; left: 0; top: 0; transform-origin: 0 0; width: 720px; height: 1280px; overflow: hidden;
+    background: #18213a; }
+  #cv { position: absolute; inset: 0; width: 720px; height: 1280px; display: block; }
+  .layer { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 28px; text-align: center; padding: 60px; box-sizing: border-box; }
+  .layer.hidden, .hidden { display: none !important; }
+  .layer h1 { font-size: 76px; line-height: 1.05; margin: 0; text-shadow: 0 6px 0 #0006; }
+  .layer p { font-size: 34px; line-height: 1.3; margin: 0; max-width: 600px; }
+  .btn { font: inherit; font-size: 44px; font-weight: 700; min-width: 360px; min-height: 112px; padding: 16px 40px;
+    border: 0; border-radius: 28px; background: #ffd166; color: #1b1b1b; cursor: pointer; box-shadow: 0 8px 0 #0005;
+    transition: transform .08s; }
+  .btn:active { transform: translateY(4px) scale(.98); }
+  .btn:focus-visible { outline: 6px solid #4cc9f0; outline-offset: 6px; }
+  .btn.small { font-size: 30px; min-width: 0; min-height: 88px; padding: 10px 26px; background: #2b3a5e; color: #eef2f8; }
+  /* the pick-one card screen: a dimmed game behind, one big button per option */
+  #choose { background: #101624cc; }
+  #chooseList { display: flex; flex-direction: column; align-items: center; gap: 24px; width: 100%; }
+  .btn.card { width: 580px; min-height: 140px; display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 6px; background: #eef2f8; }
+  .btn.card small { font-size: 28px; font-weight: 500; color: #3a4660; }
+  #hud { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between;
+    align-items: center; padding: 22px 26px; font-size: 40px; font-weight: 700; pointer-events: none; }
+  #hud .btn { pointer-events: auto; }
+  /* the credits sit on their own dark strip (SAFE_BOTTOM stage pixels), so game art never hides them */
+  #credits { position: absolute; left: 0; right: 0; bottom: 0; font-size: 22px; padding: 26px 30px 16px;
+    background: linear-gradient(#10162400, #101624d9 45%); color: #eef2f8cc; pointer-events: none; }
+  #toast { position: absolute; left: 50%; top: 200px; transform: translateX(-50%); font-size: 36px; padding: 14px 28px;
+    border-radius: 18px; background: #000b; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+  #selftest { position: fixed; inset: 16px; margin: 0; padding: 18px; background: #000d; color: #fff;
+    font: 15px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; z-index: 9; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv" width="720" height="1280" aria-hidden="true"></canvas>
+  <div id="hud" class="hidden">
+    <span id="score" aria-live="polite">0</span>
+    <button id="pauseBtn" class="btn small" type="button" aria-label="Pause">II</button>
+  </div>
+  <div id="title" class="layer">
+    <h1 id="gameName">jamshell</h1>
+    <p id="howTo">Tap to play.</p>
+    <button id="playBtn" class="btn" type="button">Play</button>
+    <button id="soundBtn" class="btn small" type="button">Sound: on</button>
+    <p id="bestLine"></p>
+  </div>
+  <div id="paused" class="layer hidden">
+    <h1>Paused</h1>
+    <button id="resumeBtn" class="btn" type="button">Resume</button>
+    <button id="quitBtn" class="btn small" type="button">Back to title</button>
+  </div>
+  <div id="over" class="layer hidden">
+    <h1>Game over</h1>
+    <p id="overScore"></p>
+    <button id="againBtn" class="btn" type="button">Play again</button>
+    <button id="menuBtn" class="btn small" type="button">Title</button>
+  </div>
+  <div id="choose" class="layer hidden" role="dialog" aria-labelledby="chooseTitle">
+    <h1 id="chooseTitle"></h1>
+    <div id="chooseList"></div>
+  </div>
+  <div id="toast" role="status"></div>
+  <div id="credits">Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made.</div>
+</div>
+<script>
+"use strict";
+// ---------------------------------------------------------------------------------------------------------
+// SHELL: layout, input, sound, music, juice, look kit, action kit, storage, scenes, self-test. A jam game
+// should not need to change this part.
+// ---------------------------------------------------------------------------------------------------------
+const VERSION = "0.4.0";
+const W = 720, H = 1280;
+const SAFE_BOTTOM = 96;  // the credits strip; keep things the player must see or tap above H - SAFE_BOTTOM
+const $ = id => document.getElementById(id);
+const stage = $("stage"), cv = $("cv"), cx = cv.getContext("2d");
+
+// The stage is always 720x1280 logical pixels, scaled to fit the window and centred (letterboxed).
+function fitView(winW, winH) {
+  const scale = Math.min(winW / W, winH / H);
+  return { scale, left: (winW - W * scale) / 2, top: (winH - H * scale) / 2 };
+}
+// A point in the window -> the same point on the 720x1280 stage.
+function toLogical(clientX, clientY, view) {
+  return { x: (clientX - view.left) / view.scale, y: (clientY - view.top) / view.scale };
+}
+let view = fitView(innerWidth, innerHeight);
+function layout() {
+  view = fitView(innerWidth, innerHeight);
+  stage.style.transform = "translate(" + view.left + "px," + view.top + "px) scale(" + view.scale + ")";
+  // keep the canvas sharp on high-density screens
+  const dpr = Math.min(3, Math.max(1, (window.devicePixelRatio || 1) * view.scale));
+  const px = Math.round(W * dpr), py = Math.round(H * dpr);
+  if (cv.width !== px || cv.height !== py) { cv.width = px; cv.height = py; }
+  cx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+}
+addEventListener("resize", layout);
+layout();
+
+// Seeded random numbers (mulberry32), so a self-test or a daily puzzle can be repeated exactly.
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Storage that never throws (itch.io runs games in an iframe where storage can be blocked).
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("jamshell." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("jamshell." + k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } },
+};
+
+// Sound: the AudioContext is made on the first tap or key, never before (browsers refuse audio before a gesture
+// and log a warning, which playcheck counts as a failure).
+const sound = {
+  on: store.get("sound", true), ac: null,
+  unlock() {
+    if (this.ac) { if (this.ac.state === "suspended") this.ac.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) this.ac = new AC();
+  },
+  // tone(frequency Hz, seconds, wave, volume 0-1, slide to Hz)
+  tone(f, dur = 0.12, type = "sine", vol = 0.2, to = 0) {
+    if (!this.on || !this.ac) return;
+    const t = this.ac.currentTime, o = this.ac.createOscillator(), g = this.ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.ac.destination); o.start(t); o.stop(t + dur + 0.02);
+  },
+  toggle() { this.on = !this.on; store.set("sound", this.on); this.showLabel(); },
+  showLabel() { $("soundBtn").textContent = "Sound: " + (this.on ? "on" : "off"); },
+};
+sound.showLabel();
+
+// Music: a small synthesized loop (pad, bass, arpeggio, drums) that follows the sound switch and stops while
+// paused. A game sets Game.music = { bpm: 104, key: 57, chords: [0, 5, 3, 4], minor: true, seed: 3 }: key is a
+// MIDI note (57 = A3), chords are scale degrees (0 = the key's own chord), one bar each. music.notes(song, step)
+// is pure, so tests can check a pattern without audio.
+const music = {
+  song: null, step: 0, next: 0, timer: 0, vol: 0.08, bus: null, buf: null,
+  notes(song, step) {
+    const scale = song.minor === false ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
+    const deg = i => scale[((i % 7) + 7) % 7] + 12 * Math.floor(i / 7);
+    const bar = Math.floor(step / 16) % song.chords.length, s = step % 16, d = song.chords[bar];
+    const triad = [deg(d), deg(d + 2), deg(d + 4)].map(n => song.key + n);
+    const pick = rng((song.seed || 1) * 131 + s);  // the same motif every bar, so the loop is catchy
+    const out = [];
+    if (s === 0) for (const n of triad) out.push({ kind: "pad", midi: n, len: 16 });
+    if (s === 0 || s === 8 || (s === 14 && pick() < 0.6)) out.push({ kind: "bass", midi: triad[0] - 12, len: s === 14 ? 2 : 4 });
+    if (s % 2 === 0 && pick() < 0.8) out.push({ kind: "arp", midi: triad[Math.floor(pick() * 3)] + 12 * (pick() < 0.35 ? 2 : 1), len: 2 });
+    if (song.drums !== false) {
+      if (s === 0 || s === 8 || (s === 10 && pick() < 0.4)) out.push({ kind: "kick" });
+      if (s === 4 || s === 12) out.push({ kind: "snare" });
+      if (s % 2 === 0) out.push({ kind: "hat" });
+    }
+    return out;
+  },
+  play(song) { this.stop(); this.song = song; this.step = 0; this.next = 0; this.tick(); this.timer = setInterval(() => this.tick(), 50); },
+  stop() { clearInterval(this.timer); this.timer = 0; this.song = null; },
+  // schedules the next 0.15 s of notes ahead of time, so timer jitter never makes the beat stumble
+  tick() {
+    const ac = sound.ac;
+    if (!this.song || !ac || !sound.on || ac.state !== "running" || scene === "paused") { if (ac) this.next = 0; return; }
+    const spb = 60 / this.song.bpm / 4;  // seconds per step (a 16th note)
+    if (this.next < ac.currentTime) this.next = ac.currentTime + 0.05;
+    while (this.next < ac.currentTime + 0.15) {
+      for (const n of this.notes(this.song, this.step)) this.voice(n, this.next, spb);
+      this.next += spb; this.step++;
+    }
+  },
+  voice(n, t, spb) {
+    const ac = sound.ac;
+    if (!this.bus) { this.bus = ac.createGain(); this.bus.connect(ac.destination); }
+    this.bus.gain.value = this.vol;
+    if (!n.midi) return this.drum(n.kind, t);
+    const o = ac.createOscillator(), g = ac.createGain(), len = n.len * spb;
+    o.type = n.kind === "bass" ? "triangle" : n.kind === "pad" ? "sine" : "square";
+    o.frequency.setValueAtTime(440 * Math.pow(2, (n.midi - 69) / 12), t);
+    const peak = n.kind === "arp" ? 0.18 : n.kind === "pad" ? 0.22 : 0.8;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + (n.kind === "pad" ? 0.3 : 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(this.bus); o.start(t); o.stop(t + len + 0.05);
+  },
+  drum(kind, t) {
+    const ac = sound.ac, g = ac.createGain();
+    if (kind === "kick") {
+      const o = ac.createOscillator();
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.connect(g).connect(this.bus); o.start(t); o.stop(t + 0.2);
+      return;
+    }
+    if (!this.buf) {
+      this.buf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.25), ac.sampleRate);
+      const d = this.buf.getChannelData(0), r = rng(5);
+      for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1;
+    }
+    const src = ac.createBufferSource(), hp = ac.createBiquadFilter(), len = kind === "hat" ? 0.04 : 0.14;
+    src.buffer = this.buf; hp.type = "highpass"; hp.frequency.value = kind === "hat" ? 7000 : 1500;
+    g.gain.setValueAtTime(kind === "hat" ? 0.2 : 0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    src.connect(hp).connect(g).connect(this.bus); src.start(t); src.stop(t + len + 0.02);
+  },
+};
+
+// Easing curves (t from 0 to 1) and tweens: tween(obj, { x: 300, alpha: 0 }, 0.4, ease.outBack, done).
+const ease = {
+  linear: t => t,
+  inQuad: t => t * t,
+  outQuad: t => t * (2 - t),
+  inOutQuad: t => t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t),
+  outCubic: t => 1 - Math.pow(1 - t, 3),
+  outBack: t => { const u = t - 1; return 1 + u * u * (2.70158 * u + 1.70158); },
+  outElastic: t => t <= 0 || t >= 1 ? t : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * 2 * Math.PI / 3) + 1,
+  outBounce: t => {
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+    return n * (t -= 2.625 / d) * t + 0.984375;
+  },
+};
+let tweens = [];
+function tween(obj, to, dur, curve = ease.outQuad, done = null) {
+  const from = {};
+  for (const k in to) from[k] = obj[k];
+  const tw = { obj, from, to, dur: Math.max(1e-6, dur), t: 0, curve, done };
+  tweens.push(tw);
+  return tw;
+}
+function stepTweens(dt) {
+  const finished = [];
+  for (const tw of tweens) {
+    tw.t = Math.min(tw.dur, tw.t + dt);
+    const k = tw.t >= tw.dur ? 1 : tw.curve(tw.t / tw.dur);
+    for (const p in tw.to) tw.obj[p] = tw.from[p] + (tw.to[p] - tw.from[p]) * k;
+    if (tw.t >= tw.dur) finished.push(tw);
+  }
+  if (!finished.length) return;
+  tweens = tweens.filter(tw => !finished.includes(tw));
+  for (const tw of finished) if (tw.done) tw.done(tw.obj);
+}
+
+// Juice, drawn over the game: fx.burst(x, y, "#ffd166") sparks, fx.text(x, y, "+10") a rising number,
+// fx.shake(12) the camera, fx.flash("#fff") the screen, fx.banner("Level 2", "faster") a ribbon across the
+// middle. Everything fades on its own. Players who ask their system for reduced motion get no shake, only a
+// faint flash, and banners that fade in place instead of sliding.
+const fx = {
+  parts: [], texts: [], banners: [], shakeAmp: 0, flashColor: "#fff", flashAlpha: 0, rand: rng(99),
+  calm: !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches),
+  burst(x, y, color = "#ffd166", n = 18, speed = 420, size = 9, life = 0.6) {
+    for (let i = 0; i < n; i++) {
+      const a = this.rand() * Math.PI * 2, v = speed * (0.35 + 0.65 * this.rand());
+      this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, r: size * (0.5 + this.rand()), life, max: life, color });
+    }
+    if (this.parts.length > 600) this.parts.splice(0, this.parts.length - 600);
+  },
+  text(x, y, s, color = "#ffffff", px = 52) { this.texts.push({ x, y, s: String(s), color, px, life: 0.9, max: 0.9 }); },
+  // one banner at a time: a new one replaces the one showing
+  banner(title, sub = "", secs = 1.6) { this.banners = [{ title: String(title), sub: String(sub), life: secs, max: secs }]; },
+  shake(amount = 10) { if (!this.calm) this.shakeAmp = Math.min(40, Math.max(this.shakeAmp, amount)); },
+  flash(color = "#ffffff", alpha = 0.45) { this.flashColor = color; this.flashAlpha = this.calm ? Math.min(alpha, 0.12) : alpha; },
+  clear() { this.parts = []; this.texts = []; this.banners = []; this.shakeAmp = 0; this.flashAlpha = 0; },
+  update(dt) {
+    const drag = Math.pow(0.08, dt);
+    for (const p of this.parts) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= drag; p.vy = p.vy * drag + 700 * dt; }
+    this.parts = this.parts.filter(p => p.life > 0);
+    for (const t of this.texts) { t.life -= dt; t.y -= 110 * dt; }
+    this.texts = this.texts.filter(t => t.life > 0);
+    for (const b of this.banners) b.life -= dt;
+    this.banners = this.banners.filter(b => b.life > 0);
+    this.shakeAmp = this.shakeAmp > 0.3 ? this.shakeAmp * Math.pow(0.002, dt) : 0;
+    this.flashAlpha = Math.max(0, this.flashAlpha - dt * 2.5);
+  },
+  offset() {
+    if (!this.shakeAmp) return { x: 0, y: 0 };
+    return { x: (this.rand() * 2 - 1) * this.shakeAmp, y: (this.rand() * 2 - 1) * this.shakeAmp };
+  },
+  draw(c) {
+    for (const p of this.parts) {
+      const k = Math.max(0, p.life / p.max);
+      c.globalAlpha = k; c.fillStyle = p.color;
+      c.beginPath(); c.arc(p.x, p.y, p.r * (0.4 + 0.6 * k), 0, Math.PI * 2); c.fill();
+    }
+    for (const t of this.texts) {
+      const k = t.life / t.max;  // 1 -> 0; the number pops in big, then settles and fades
+      c.globalAlpha = Math.min(1, k * 2.5);
+      paint.text(c, t.s, t.x, t.y, Math.round(t.px * (k > 0.8 ? 1 + (k - 0.8) * 2 : 1)), t.color);
+    }
+    for (const b of this.banners) {
+      // slides in from the left, holds, slides out to the right; with reduced motion it only fades
+      const t = 1 - b.life / b.max, inK = Math.min(1, t / 0.2), outK = Math.max(0, (t - 0.8) / 0.2);
+      const dx = this.calm ? 0 : (ease.outCubic(inK) - 1) * W + ease.inQuad(outK) * W;
+      c.globalAlpha = this.calm ? Math.min(1, inK * 2, (1 - outK) * 2) : 1;
+      const y = H * 0.38, low = b.sub ? 112 : 76;
+      c.fillStyle = "rgba(16,22,36,.82)"; c.fillRect(dx - 40, y - 76, W + 80, 76 + low);
+      c.fillStyle = "#ffd166"; c.fillRect(dx - 40, y - 82, W + 80, 6); c.fillRect(dx - 40, y + low, W + 80, 6);
+      paint.text(c, b.title, W / 2 + dx, y, 80, "#ffffff");
+      if (b.sub) paint.text(c, b.sub, W / 2 + dx, y + 66, 36, "#ffd166");
+    }
+    c.globalAlpha = 1;
+    if (this.flashAlpha > 0) { c.globalAlpha = this.flashAlpha; c.fillStyle = this.flashColor; c.fillRect(-50, -50, W + 100, H + 100); c.globalAlpha = 1; }
+  },
+};
+
+// Look kit (new in 0.4.0): colour maths, sticker shapes, a parallax backdrop and a vignette, so a 48-hour game
+// can look finished. Colours are "#rgb" or "#rrggbb" strings ("#rrggbbaa" keeps its alpha).
+function hexParts(s) {
+  let h = String(s).replace("#", "");
+  if (h.length === 3) h = h.replace(/./g, ch => ch + ch);
+  return { rgb: [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0), alpha: h.length === 8 ? h.slice(6) : "" };
+}
+function hexOf(rgb, alpha = "") {
+  return "#" + rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("") + alpha;
+}
+// The corners of a regular polygon ("poly", n sides) or a star ("star", n points), pointing up when rot = 0.
+function shapePoints(kind, x, y, r, n = 5, rot = 0) {
+  const pts = [], count = kind === "star" ? n * 2 : n;
+  for (let i = 0; i < count; i++) {
+    const a = rot - Math.PI / 2 + i * Math.PI * 2 / count, d = kind === "star" && i % 2 ? r * 0.48 : r;
+    pts.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d });
+  }
+  return pts;
+}
+// A seeded parallax backdrop: layers of rolling hills from far (pale, slow) to near (dark, fast) and a few
+// twinkles up high. Make it once, bd = makeBackdrop(seed, palettes.dusk), and draw it every frame with
+// paint.backdrop(c, bd, scroll, time); each layer tiles seamlessly, so scroll can grow forever.
+function makeBackdrop(seed, look, layers = 3) {
+  const r = rng(seed), bd = { layers: [], dots: [] }, haze = paint.mix(look.top, look.bottom, 0.75);
+  for (let i = 0; i < layers; i++) {
+    const k = (i + 1) / layers, base = H * (0.6 + 0.2 * i / Math.max(1, layers - 1)), amp = 60 + 60 * k, ys = [];
+    for (let j = 0; j < 8; j++) ys.push(Math.round(base - amp * r()));
+    bd.layers.push({ speed: 0.15 + 0.85 * k, color: paint.shade(haze, -0.12 - 0.42 * k), ys });
+  }
+  for (let i = 0; i < 28; i++) bd.dots.push({ x: r() * W, y: r() * H * 0.42, r: 1.5 + r() * 2.5, tw: r() * 6.283 });
+  return bd;
+}
+
+// Drawing helpers and a few ready palettes.
+const palettes = {
+  dusk:   { top: "#2b2d6e", bottom: "#f28f6b", a: "#ffd166", b: "#ef476f", c: "#4cc9f0", ink: "#fff7ec" },
+  candy:  { top: "#ffd6e8", bottom: "#c1f0ff", a: "#ff5d8f", b: "#7b5cff", c: "#22c3a6", ink: "#2a1f3d" },
+  forest: { top: "#0f2e2a", bottom: "#355e3b", a: "#f4d35e", b: "#ee964b", c: "#95d5b2", ink: "#f1faee" },
+  neon:   { top: "#0b0221", bottom: "#2a0a4a", a: "#00f5d4", b: "#f15bb5", c: "#fee440", ink: "#ffffff" },
+};
+const paint = {
+  sky(c, top, bottom) {
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, top); g.addColorStop(1, bottom);
+    c.fillStyle = g; c.fillRect(-50, -50, W + 100, H + 100);
+  },
+  box(c, x, y, w, h, r, fill, stroke, lw = 4) {
+    c.beginPath();
+    if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h);
+    if (fill) { c.fillStyle = fill; c.fill(); }
+    if (stroke) { c.lineWidth = lw; c.strokeStyle = stroke; c.stroke(); }
+  },
+  glow(c, x, y, r, color, blur = 30) {
+    c.save(); c.shadowColor = color; c.shadowBlur = blur; c.fillStyle = color;
+    c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); c.restore();
+  },
+  text(c, s, x, y, px = 48, color = "#ffffff", align = "center") {
+    c.font = "800 " + px + "px system-ui, 'Segoe UI', Roboto, sans-serif";
+    c.textAlign = align; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(4, px / 7); c.strokeStyle = "rgba(0,0,0,.5)"; c.strokeText(s, x, y);
+    c.fillStyle = color; c.fillText(s, x, y);
+  },
+  // shade("#4cc9f0", -0.4) is 40% darker, +0.4 is 40% lighter; mix(a, b, 0.5) is halfway. Both are pure.
+  shade(hex, k) {
+    const { rgb, alpha } = hexParts(hex), t = Math.max(-1, Math.min(1, k));
+    return hexOf(rgb.map(v => t < 0 ? v * (1 + t) : v + (255 - v) * t), alpha);
+  },
+  mix(a, b, t) {
+    const A = hexParts(a), B = hexParts(b);
+    return hexOf(A.rgb.map((v, i) => v + (B.rgb[i] - v) * t), A.alpha);
+  },
+  // A sticker: a shape with a soft drop shadow, a lighter top, a dark outline and a shine, the look of flat
+  // game art. kind: "circle", "poly" (n sides) or "star" (n points); rot turns it.
+  sticker(c, kind, x, y, r, fill, n = 5, rot = 0) {
+    const pts = kind === "circle" ? null : shapePoints(kind, x, y, r, n, rot);
+    const path = dy => {
+      c.beginPath();
+      if (!pts) c.arc(x, y + dy, r, 0, Math.PI * 2);
+      else pts.forEach((p, i) => i ? c.lineTo(p.x, p.y + dy) : c.moveTo(p.x, p.y + dy));
+      c.closePath();
+    };
+    path(r * 0.14); c.fillStyle = "rgba(0,0,0,.28)"; c.fill();
+    const g = c.createLinearGradient(x, y - r, x, y + r);
+    g.addColorStop(0, this.shade(fill, 0.28)); g.addColorStop(1, this.shade(fill, -0.18));
+    path(0); c.fillStyle = g; c.fill();
+    c.lineJoin = "round"; c.lineWidth = Math.max(3, r * 0.14); c.strokeStyle = this.shade(fill, -0.6); c.stroke();
+    c.fillStyle = "rgba(255,255,255,.45)";
+    c.beginPath(); c.ellipse(x - r * 0.3, y - r * 0.38, r * 0.22, r * 0.12, -0.5, 0, Math.PI * 2); c.fill();
+  },
+  backdrop(c, bd, scroll = 0, time = 0) {
+    c.fillStyle = "#ffffff";
+    for (const d of bd.dots) {
+      c.globalAlpha = 0.3 + 0.3 * Math.sin(time * 2 + d.tw);
+      c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+    }
+    c.globalAlpha = 1;
+    const moved = fx.calm ? 0 : scroll;  // players who ask for reduced motion get still hills
+    for (const L of bd.layers) {
+      // a smooth curve through the hill tops, drawn a little wider than two tiles so no edge ever shows
+      const n = L.ys.length, step = W / n, off = -((moved * L.speed) % W + W) % W;
+      const y = i => L.ys[((i % n) + n) % n], x = i => off + i * step;
+      c.fillStyle = L.color; c.beginPath();
+      c.moveTo(x(-0.5), H + 50); c.lineTo(x(-0.5), (y(-1) + y(0)) / 2);
+      for (let i = 0; i <= 2 * n; i++) c.quadraticCurveTo(x(i), y(i), x(i + 0.5), (y(i) + y(i + 1)) / 2);
+      c.lineTo(x(2 * n + 0.5), H + 50); c.closePath(); c.fill();
+    }
+  },
+  // darkens the edges so the eye goes to the middle; strength 0-1
+  vignette(c, strength = 0.4) {
+    const v = this.vig;
+    if (!v || v.c !== c || v.k !== strength) {
+      const g = c.createRadialGradient(W / 2, H * 0.45, H * 0.25, W / 2, H * 0.45, H * 0.75);
+      g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0," + strength + ")");
+      this.vig = { c, k: strength, g };
+    }
+    c.fillStyle = this.vig.g; c.fillRect(-50, -50, W + 100, H + 100);
+  },
+};
+
+// Action kit (new in 0.3.0), for games where the player moves: held keys, a floating touch stick, one
+// movement axis that merges both, circle hits, the nearest target, and a pick-one card screen (level-ups,
+// shops, upgrades; see choose() below). A game sets Game.stick = true to turn the stick on.
+const held = new Set();  // keys held down right now; letters are stored lower-case
+const keyName = k => k.length === 1 ? k.toLowerCase() : k;
+// The stick appears wherever a finger (or mouse) goes down and tilts toward the drag, up to R stage pixels.
+const stick = {
+  active: false, ox: 0, oy: 0, x: 0, y: 0, R: 110, dead: 0.15,
+  begin(px, py) { Object.assign(this, { active: true, ox: px, oy: py, x: 0, y: 0 }); },
+  move(px, py) {
+    if (!this.active) return;
+    let dx = (px - this.ox) / this.R, dy = (py - this.oy) / this.R;
+    const m = Math.hypot(dx, dy);
+    if (m < this.dead) { dx = 0; dy = 0; } else if (m > 1) { dx /= m; dy /= m; }
+    this.x = dx; this.y = dy;
+  },
+  end() { this.active = false; this.x = 0; this.y = 0; },
+  draw(c) {
+    if (!this.active) return;
+    c.globalAlpha = 0.3; c.lineWidth = 6; c.strokeStyle = "#ffffff";
+    c.beginPath(); c.arc(this.ox, this.oy, this.R, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.5; c.fillStyle = "#ffffff";
+    c.beginPath(); c.arc(this.ox + this.x * this.R, this.oy + this.y * this.R, 44, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 1;
+  },
+};
+// Where the player wants to go: arrows or WASD (diagonals as fast as straight lines), else the stick.
+function axis() {
+  let x = 0, y = 0;
+  if (held.has("ArrowLeft") || held.has("a")) x -= 1;
+  if (held.has("ArrowRight") || held.has("d")) x += 1;
+  if (held.has("ArrowUp") || held.has("w")) y -= 1;
+  if (held.has("ArrowDown") || held.has("s")) y += 1;
+  const m = Math.hypot(x, y);
+  return m ? { x: x / m, y: y / m } : { x: stick.x, y: stick.y };
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// Two circles ({ x, y, r }) touch.
+function hit(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) <= (a.r || 0) + (b.r || 0); }
+// The closest item of a list to (x, y), or null if none is within maxD.
+function nearest(list, x, y, maxD = Infinity) {
+  let best = null, bd = maxD;
+  for (const it of list) { const d = Math.hypot(it.x - x, it.y - y); if (d <= bd) { best = it; bd = d; } }
+  return best;
+}
+
+// A swipe is a quick, mostly straight move of at least 60 logical pixels; anything else is a tap.
+function classifyGesture(dx, dy, ms) {
+  const d = Math.hypot(dx, dy);
+  if (d < 60 || ms > 600) return d < 30 ? "tap" : "none";
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+}
+
+// sound.unlock() is called from pointerup, clicks and keys only: on touch screens pointerdown is not a gesture
+// the browser accepts for audio, and Escape never is.
+let down = null;
+cv.addEventListener("pointerdown", e => {
+  const p = toLogical(e.clientX, e.clientY, view);
+  down = { x: p.x, y: p.y, t: performance.now() };
+  if (scene !== "play") return;
+  if (Game.stick) {
+    stick.begin(p.x, p.y);
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* keep going without capture */ }  // drags may leave the stage
+  }
+  if (Game.onPress) Game.onPress(p.x, p.y);
+});
+cv.addEventListener("pointermove", e => {
+  if (scene !== "play" || !down) return;
+  const p = toLogical(e.clientX, e.clientY, view);
+  stick.move(p.x, p.y);
+  if (Game.onDrag) Game.onDrag(p.x, p.y);
+});
+addEventListener("pointerup", e => {
+  sound.unlock(); stick.end();
+  if (!down) return;
+  const p = toLogical(e.clientX, e.clientY, view), kind = classifyGesture(p.x - down.x, p.y - down.y, performance.now() - down.t);
+  down = null;
+  if (scene !== "play") return;
+  if (kind === "tap" && Game.onTap) Game.onTap(p.x, p.y);
+  else if (kind !== "tap" && kind !== "none" && Game.onSwipe) Game.onSwipe(kind);
+});
+addEventListener("pointercancel", () => { down = null; stick.end(); });
+addEventListener("keydown", e => {
+  held.add(keyName(e.key));
+  if (e.key !== "Escape") sound.unlock();
+  if (scene === "choose") {  // 1-4 pick a card; Enter and Space work through the focused button
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= $("chooseList").children.length) pick(n - 1);
+    return;
+  }
+  if (e.key === "Escape" || e.key === "p") { if (scene === "play") pause(); else if (scene === "paused") resume(); return; }
+  if (scene === "play" && Game.onKey) Game.onKey(e.key);
+});
+addEventListener("keyup", e => { held.delete(keyName(e.key)); });
+addEventListener("blur", () => { held.clear(); stick.end(); });
+document.addEventListener("contextmenu", e => e.preventDefault());
+
+function toast(text, ms = 1200) {
+  const t = $("toast"); t.textContent = text; t.classList.add("on");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("on"), ms);
+}
+
+// Scenes: title -> play -> (paused | choose) -> over.
+let scene = "title";
+function show(name) {
+  scene = name;
+  for (const id of ["title", "paused", "over", "choose"]) $(id).classList.toggle("hidden", id !== name);
+  $("hud").classList.toggle("hidden", name !== "play" && name !== "paused" && name !== "choose");
+}
+function start() {
+  sound.unlock(); tweens = []; fx.clear(); held.clear(); stick.end();
+  Game.start(rng(Date.now() & 0xffffffff)); setScore(0); show("play");
+  if (Game.music && music.song !== Game.music) music.play(Game.music);
+}
+function pause() { if (scene === "play") show("paused"); }
+function resume() { if (scene === "paused") { show("play"); last = 0; } }
+function end() {
+  const best = Math.max(store.get("best", 0), Game.score);
+  store.set("best", best);
+  $("overScore").textContent = "Score " + Game.score + " · best " + best;
+  show("over"); showBest();
+}
+// The pick-one card screen: choose("Level up!", [{ label: "Faster", detail: "+20% speed" }, ...], i => ...)
+// freezes the game, shows up to four big buttons and calls back with the index picked (tap, click, Enter or
+// keys 1-4), then play goes on. It opens only during play and returns whether it opened.
+let chooseDone = null;
+function choose(title, options, done) {
+  if (scene !== "play" || !options.length) return false;
+  $("chooseTitle").textContent = title;
+  const list = $("chooseList"); list.textContent = "";
+  options.slice(0, 4).forEach((o, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn card";
+    b.append(document.createTextNode((i + 1) + ". " + o.label));
+    if (o.detail) { const s = document.createElement("small"); s.textContent = o.detail; b.append(s); }
+    b.onclick = () => pick(i);
+    list.append(b);
+  });
+  chooseDone = done; stick.end(); held.clear(); show("choose");
+  list.firstChild.focus({ preventScroll: true });  // keyboard players start on the first card
+  return true;
+}
+function pick(i) {
+  if (scene !== "choose") return;
+  const done = chooseDone; chooseDone = null;
+  show("play"); last = 0;
+  if (done) done(i);
+}
+function setScore(n) { $("score").textContent = String(n); }
+function showBest() { const b = store.get("best", 0); $("bestLine").textContent = b ? "Best: " + b : ""; }
+$("playBtn").onclick = start; $("againBtn").onclick = start;
+$("menuBtn").onclick = () => show("title"); $("quitBtn").onclick = () => show("title");
+$("pauseBtn").onclick = pause; $("resumeBtn").onclick = resume;
+$("soundBtn").onclick = () => { sound.unlock(); sound.toggle(); };
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+
+let last = 0;
+function frame(t) {
+  const dt = last ? Math.min(0.05, (t - last) / 1000) : 0; last = t;
+  if (scene === "play") { Game.update(dt); setScore(Game.score); if (Game.over) end(); }
+  if (scene !== "paused" && scene !== "choose") { stepTweens(dt); fx.update(dt); }
+  // clear first: a shaken frame would otherwise leave the last frame's pixels along the edges
+  cx.fillStyle = "#101624"; cx.fillRect(0, 0, W, H);
+  const o = fx.offset();
+  cx.save(); cx.translate(o.x, o.y);
+  Game.draw(cx, scene); fx.draw(cx);
+  cx.restore();
+  if (scene === "play") stick.draw(cx);  // the stick stays still while the screen shakes
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// DEMO (replace in a jam game): "Pop", tap the bubbles before they float away. Only here so the shell can be
+// played and tested. A game object needs: name, howTo, score, over, start(rand), update(dt), draw(ctx, scene)
+// and any of onTap(x, y), onPress(x, y), onDrag(x, y), onSwipe(dir), onKey(key), plus tests for selftest().
+// Optional: music (a song for the music loop), stick (true turns on the touch stick; read axis() in update).
+// Juice to reach for: fx, tween/ease, paint, palettes. Look: paint.sticker, makeBackdrop + paint.backdrop,
+// paint.vignette, paint.shade/mix, fx.banner. Action games: axis, hit, nearest, clamp, choose.
+// ---------------------------------------------------------------------------------------------------------
+const Game = {
+  name: "Pop", howTo: "Tap the bubbles before they float away. Gold stars are worth 3. Three misses and it's over.",
+  music: { bpm: 104, key: 57, chords: [0, 5, 3, 4], minor: true, seed: 3 },
+  score: 0, over: false, bubbles: [], misses: 0, rand: Math.random, spawn: 0, lastTap: null, look: palettes.dusk,
+  t: 0, bd: null,
+  start(rand) {
+    Object.assign(this, { score: 0, over: false, bubbles: [], misses: 0, rand, spawn: 0, t: 0 });
+    fx.banner("Go!", "pop the bubbles");
+  },
+  update(dt) {
+    this.t += dt; this.spawn -= dt;
+    if (this.spawn <= 0) {
+      this.spawn = Math.max(0.35, 1.1 - this.score * 0.02);
+      const b = { x: 90 + this.rand() * (W - 180), y: H + 60, r: 56 + this.rand() * 30, v: 220 + this.score * 6, s: 0 };
+      b.star = this.rand() < 0.15;
+      this.bubbles.push(b);
+      tween(b, { s: 1 }, 0.4, ease.outBack);
+    }
+    for (const b of this.bubbles) b.y -= b.v * dt;
+    const before = this.bubbles.length;
+    this.bubbles = this.bubbles.filter(b => b.y + b.r > 0);
+    const missed = before - this.bubbles.length;
+    if (missed) { this.misses += missed; fx.shake(16); fx.flash(this.look.b, 0.3); sound.tone(140, 0.25, "sawtooth", 0.1, 60); }
+    if (this.misses >= 3) this.over = true;
+  },
+  onTap(x, y) {
+    this.lastTap = { x, y };
+    const i = this.bubbles.findIndex(b => Math.hypot(b.x - x, b.y - y) <= b.r + 12);
+    if (i < 0) { sound.tone(160, 0.08, "triangle", 0.12); fx.burst(x, y, "#ffffff88", 6, 200, 6, 0.35); return; }
+    const b = this.bubbles[i], gain = b.star ? 3 : 1, level = Math.floor(this.score / 10);
+    this.bubbles.splice(i, 1); this.score += gain;
+    fx.burst(b.x, b.y, b.star ? this.look.a : this.look.c, b.star ? 32 : 22); fx.text(b.x, b.y, "+" + gain, this.look.a);
+    sound.tone((b.star ? 780 : 520) + this.score * 8, 0.1, "sine", 0.2, 900);
+    if (Math.floor(this.score / 10) > level) { fx.banner("Level " + (level + 2), "faster bubbles"); fx.flash(this.look.a, 0.25); }
+  },
+  draw(c, scene) {
+    if (!this.bd) this.bd = makeBackdrop(11, this.look);
+    paint.sky(c, this.look.top, this.look.bottom);
+    paint.backdrop(c, this.bd, this.t * 40, this.t);
+    for (const b of this.bubbles) {
+      const r = b.r * (b.s === undefined ? 1 : b.s);
+      if (b.star) { paint.sticker(c, "star", b.x, b.y, r, this.look.a, 5, fx.calm ? 0 : this.t * 1.5); continue; }
+      c.beginPath(); c.arc(b.x, b.y, r, 0, Math.PI * 2);
+      c.fillStyle = "rgba(76,201,240,.30)"; c.fill();
+      c.lineWidth = 5; c.strokeStyle = this.look.c; c.stroke();
+      c.fillStyle = "rgba(255,255,255,.55)";
+      c.beginPath(); c.arc(b.x - r * 0.35, b.y - r * 0.35, r * 0.18, 0, Math.PI * 2); c.fill();
+    }
+    if (scene === "play") {
+      for (let i = 0; i < 3 - this.misses; i++) paint.glow(c, W / 2 - 50 + i * 50, 70, 14, this.look.b, 18);
+    }
+    paint.vignette(c, 0.4);
+  },
+  tests(check) {
+    this.start(rng(7));
+    check(fx.banners.length === 1 && fx.banners[0].title === "Go!", "a new game opens with a banner");
+    this.bubbles = [{ x: 300, y: 600, r: 60, v: 0 }];
+    this.onTap(330, 620); check(this.score === 1 && this.bubbles.length === 0, "a tap on a bubble pops it");
+    check(fx.parts.length > 0 && fx.texts.length === 1, "a pop throws sparks and a +1");
+    this.bubbles = [{ x: 300, y: 600, r: 60, v: 0 }];
+    this.onTap(600, 1100); check(this.score === 1 && this.bubbles.length === 1, "a tap on empty space pops nothing");
+    this.bubbles = [{ x: 300, y: 600, r: 60, v: 0, star: true }];
+    this.onTap(300, 600); check(this.score === 4, "a gold star is worth 3");
+    this.score = 9; this.bubbles = [{ x: 300, y: 600, r: 60, v: 0 }]; fx.clear();
+    this.onTap(300, 600); check(fx.banners.length === 1 && fx.banners[0].title === "Level 2", "reaching 10 shows a level banner");
+    this.start(rng(7));
+    for (let i = 0; i < 600 && !this.over; i++) this.update(0.05);
+    check(this.over && this.misses === 3, "three missed bubbles end the game");
+    this.start(rng(1)); tweens = []; fx.clear();
+  },
+};
+// ---------------------------------------- end of DEMO ----------------------------------------------------
+
+$("gameName").textContent = Game.name; $("howTo").textContent = Game.howTo; document.title = Game.name;
+showBest();
+
+// #selftest: shell checks, then the game's own tests. Prints "No problems found." when everything passes.
+function selftest() {
+  const problems = [];
+  const check = (ok, what) => { if (!ok) problems.push("FAILED: " + what); };
+  const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
+  let v = fitView(720, 1280); check(near(v.scale, 1) && near(v.left, 0) && near(v.top, 0), "720x1280 fills the window");
+  v = fitView(1280, 720); check(near(v.scale, 0.5625) && near(v.left, 437.5) && near(v.top, 0), "landscape window letterboxes");
+  v = fitView(390, 844); const p = toLogical(195, 422, v); check(near(p.x, 360) && near(p.y, 640), "window centre maps to stage centre");
+  const q = toLogical(v.left, v.top, v); check(near(q.x, 0) && near(q.y, 0), "stage corner maps to 0,0");
+  check(classifyGesture(5, 3, 100) === "tap", "a short press is a tap");
+  check(classifyGesture(120, 10, 200) === "right" && classifyGesture(-5, -140, 200) === "up", "swipes have directions");
+  check(classifyGesture(120, 0, 900) === "none", "a slow drag is not a swipe");
+  const a = rng(42), b = rng(42); check(a() === b() && a() === b(), "seeded random repeats");
+  const r = rng(3); let lo = 1, hi = 0; for (let i = 0; i < 1000; i++) { const x = r(); lo = Math.min(lo, x); hi = Math.max(hi, x); }
+  check(lo >= 0 && hi < 1 && hi - lo > 0.9, "random stays in [0, 1)");
+  store.set("selftest", { n: 1 }); check(store.get("selftest", null) !== undefined, "storage never throws");
+  check(sound.ac === null, "no sound before a gesture");
+  check(/with AI agents/.test($("credits").textContent), "AI credits are shown");
+  // easing and tweens
+  for (const k in ease) check(near(ease[k](0), 0, 1e-3) && near(ease[k](1), 1, 1e-3), "ease." + k + " runs from 0 to 1");
+  check(ease.outBack(0.5) > 1 - 1e-9 || ease.outBack(0.7) > 1, "outBack overshoots");
+  const obj = { x: 0, y: 10 }; let doneWith = null;
+  tween(obj, { x: 100 }, 0.5, ease.linear, o => { doneWith = o; });
+  stepTweens(0.25); check(near(obj.x, 50) && obj.y === 10 && doneWith === null, "a tween is halfway at half time and leaves other fields");
+  stepTweens(0.3); check(obj.x === 100 && doneWith === obj && tweens.length === 0, "a tween lands exactly, calls done and is removed");
+  // juice
+  fx.clear(); fx.burst(100, 100, "#fff", 10); fx.text(100, 100, "+5"); fx.shake(20); fx.flash("#fff", 0.5);
+  check(fx.parts.length === 10 && fx.texts.length === 1 && fx.shakeAmp === (fx.calm ? 0 : 20), "fx starts sparks, text and shake");
+  for (let i = 0; i < 20; i++) fx.update(0.05);
+  check(fx.parts.length === 0 && fx.texts.length === 0 && fx.shakeAmp === 0 && fx.flashAlpha === 0, "fx fades to nothing within a second");
+  const calm = fx.calm; fx.calm = true; fx.shake(30); fx.flash("#fff", 0.9);
+  check(fx.shakeAmp === 0 && fx.flashAlpha <= 0.12, "reduced motion means no shake and a faint flash");
+  fx.calm = calm; fx.clear();
+  for (let i = 0; i < 700; i++) fx.burst(0, 0, "#fff", 1);
+  check(fx.parts.length === 600, "sparks are capped at 600"); fx.clear();
+  fx.banner("Level 2", "faster", 1); fx.update(0.5);
+  check(fx.banners.length === 1 && fx.banners[0].title === "Level 2", "a banner stays up for its time");
+  fx.update(0.6); check(fx.banners.length === 0, "then the banner goes");
+  fx.banner("A"); fx.banner("B"); check(fx.banners.length === 1 && fx.banners[0].title === "B", "a new banner replaces the old one");
+  fx.clear(); check(fx.banners.length === 0, "fx.clear removes banners");
+  // look kit
+  check(paint.shade("#808080", -1) === "#000000" && paint.shade("#808080", 1) === "#ffffff", "shade runs from black to white");
+  check(paint.shade("#4cc9f0", 0) === "#4cc9f0" && paint.shade("#fff", -0.5) === "#808080", "shade 0 keeps the colour and #rgb works");
+  check(paint.shade("#ffffff80", -1) === "#00000080" && paint.shade("#123456", -5) === "#000000", "shade keeps alpha and clamps");
+  check(paint.mix("#000000", "#ffffff", 0.5) === "#808080" && paint.mix("#102030", "#405060", 0) === "#102030" &&
+        paint.mix("#102030", "#405060", 1) === "#405060", "mix runs from one colour to the other");
+  const star = shapePoints("star", 100, 100, 50, 5);
+  check(star.length === 10 && near(star[0].x, 100) && near(star[0].y, 50), "a star has 2n corners and points up");
+  check(star.every((pt, i) => near(Math.hypot(pt.x - 100, pt.y - 100), i % 2 ? 24 : 50)), "a star alternates outer and inner corners");
+  const hexagon = shapePoints("poly", 0, 0, 30, 6);
+  check(hexagon.length === 6 && hexagon.every(pt => near(Math.hypot(pt.x, pt.y), 30)), "a polygon's corners sit on its circle");
+  const bd1 = makeBackdrop(5, palettes.dusk);
+  check(JSON.stringify(bd1) === JSON.stringify(makeBackdrop(5, palettes.dusk)) &&
+        JSON.stringify(bd1) !== JSON.stringify(makeBackdrop(6, palettes.dusk)), "a backdrop repeats for its seed");
+  check(bd1.layers.length === 3 && bd1.layers.every((L, i) => !i || L.speed > bd1.layers[i - 1].speed), "near layers move faster");
+  check(bd1.layers.every(L => L.ys.every(y => y > H * 0.4 && y < H)), "hills stay in the lower part of the screen");
+  check(bd1.layers.every((L, i) => !i || hexParts(L.color).rgb.reduce((s, x) => s + x, 0) <
+        hexParts(bd1.layers[i - 1].color).rgb.reduce((s, x) => s + x, 0)), "near layers are darker");
+  const ocv = document.createElement("canvas"); ocv.width = 100; ocv.height = 100;
+  const oc = ocv.getContext("2d", { willReadFrequently: true });  // no readback warning in the console
+  try {
+    paint.sticker(oc, "circle", 50, 50, 30, "#ff0000");
+    const px = oc.getImageData(50, 60, 1, 1).data;
+    check(px[3] === 255 && px[0] > 150 && px[1] < 80 && px[2] < 80, "a sticker paints its own colour");
+    paint.sticker(oc, "star", 50, 50, 30, "#ffd166", 5, 0.3); paint.sticker(oc, "poly", 50, 50, 30, "#ef476f", 6);
+    paint.backdrop(oc, bd1, 12345.6, 3); paint.backdrop(oc, bd1, -77, 0); paint.vignette(oc, 0.5);
+    fx.banner("x", "y"); fx.update(0.4); fx.draw(oc); fx.clear();
+  } catch (e) { problems.push("FAILED: the look kit draws without errors: " + e); }
+  // music
+  const song = { bpm: 100, key: 57, chords: [0, 5, 3, 4], seed: 2 };
+  const n0 = music.notes(song, 0);
+  check(n0.some(n => n.kind === "kick") && n0.some(n => n.kind === "bass") && n0.filter(n => n.kind === "pad").length === 3, "bar start has kick, bass and a chord");
+  check(JSON.stringify(music.notes(song, 37)) === JSON.stringify(music.notes(song, 37)), "the music pattern repeats exactly");
+  const bassOf = bar => music.notes(song, bar * 16).find(n => n.kind === "bass").midi;
+  check(bassOf(0) === 45 && bassOf(1) !== bassOf(0) && bassOf(4) === bassOf(0), "bass follows the chords and loops");
+  let range = true;
+  for (let s = 0; s < 64; s++) for (const n of music.notes(song, s)) if (n.midi && (n.midi < 24 || n.midi > 108)) range = false;
+  check(range, "every note is in a playable range");
+  check(music.notes(Object.assign({}, song, { drums: false }), 4).every(n => n.midi), "drums can be turned off");
+  check(music.song === null, "no music before a gesture");
+  // action kit
+  stick.begin(300, 900); stick.move(300 + 2 * stick.R, 900);
+  check(stick.active && near(stick.x, 1) && near(stick.y, 0), "the stick tops out at full tilt");
+  stick.move(300, 900 + stick.R / 2); check(near(stick.x, 0) && near(stick.y, 0.5), "half a radius is half tilt");
+  stick.move(304, 903); check(stick.x === 0 && stick.y === 0, "a small wobble stays in the dead zone");
+  stick.end(); check(!stick.active && stick.x === 0 && stick.y === 0, "lifting the finger lets the stick go");
+  stick.move(500, 500); check(stick.x === 0 && stick.y === 0, "an idle stick ignores moves");
+  held.clear(); held.add("ArrowRight"); held.add(keyName("W"));
+  let ax = axis(); check(near(ax.x, Math.SQRT1_2) && near(ax.y, -Math.SQRT1_2), "diagonal keys move as fast as straight ones");
+  held.add("ArrowLeft"); ax = axis(); check(near(ax.x, 0) && near(ax.y, -1), "opposite keys cancel");
+  held.clear(); stick.begin(0, 0); stick.move(0, stick.R); ax = axis();
+  check(near(ax.x, 0) && near(ax.y, 1), "without keys the stick drives the axis"); stick.end();
+  check(hit({ x: 0, y: 0, r: 10 }, { x: 16, y: 0, r: 6 }) && !hit({ x: 0, y: 0, r: 10 }, { x: 17, y: 0, r: 6 }), "circles hit when their edges meet");
+  const pts = [{ x: 100, y: 0 }, { x: 30, y: 40 }, { x: -200, y: 0 }];
+  check(nearest(pts, 0, 0) === pts[1] && nearest(pts, 0, 0, 40) === null && nearest([], 0, 0) === null, "nearest finds the closest in range");
+  check(clamp(5, 0, 3) === 3 && clamp(-1, 0, 3) === 0 && clamp(2, 0, 3) === 2, "clamp keeps values in range");
+  check(choose("Pick", [{ label: "A" }], () => {}) === false && scene === "title", "cards open only during play");
+  show("play"); let got = -1;
+  check(choose("Pick", [{ label: "A" }, { label: "B", detail: "the second" }], i => { got = i; }) === true, "cards open during play");
+  check(scene === "choose" && $("chooseList").children.length === 2 && /2\. B/.test($("chooseList").textContent), "one numbered button per option");
+  pick(1); check(got === 1 && scene === "play", "a pick returns its index and play goes on");
+  pick(0); check(got === 1, "a pick with no cards open does nothing");
+  choose("Many", [1, 2, 3, 4, 5, 6].map(n => ({ label: "x" + n })), () => {});
+  check($("chooseList").children.length === 4, "at most four cards"); pick(0);
+  show("title");
+  try { Game.tests(check); } catch (e) { problems.push("game tests threw: " + e); }
+  const out = document.createElement("pre"); out.id = "selftest";
+  out.textContent = Game.name + " self-test (jamshell " + VERSION + ")\n" + (problems.length ? problems.join("\n") : "No problems found.");
+  out.onclick = () => out.remove();
+  document.body.append(out);
+}
+if (location.hash === "#selftest") selftest();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
