@@ -58,14 +58,21 @@ A jam game replaces only the block between `// DEMO (replace in a jam game)` and
 - `playcheck.py`: plays any single-file HTML game in headless Chromium, takes screenshots per viewport and
   records gameplay video. Needs `pip install playwright` and `python -m playwright install chromium`; the tests
   below do not.
+- `framewalk.py`: records a gameplay video with the game's own sound one frame at a time on a virtual clock, so
+  a slow or busy machine still gives a full-speed video with the sound in sync. It plays each seed first,
+  records the one with the shortest stretch without progress, and fails if the recording does not end on the
+  frame the probe predicted. Same needs as playcheck, plus ffmpeg; the spec's keys are listed at the top of the
+  file. The idea is not new (CCapture.js, timecut and trailer-kit step a page's clock too); this is one file
+  sized for jamshell games, first used for the walkthrough video of MV2's jam game Lantern Drift.
 - `package.py`: zips a build for itch.io and refuses it if it loads anything from the network, lacks the
   credits text, breaks itch.io's limits, or carries any text listed in a private `--forbid` file.
-- `test_jamshell.py`, `test_package.py`: unit tests (no browser needed).
+- `test_jamshell.py`, `test_package.py`, `test_framewalk.py`: unit tests (no browser needed).
 
 ```
-python -m unittest -v test_jamshell.py test_package.py
+python -m unittest -v test_jamshell.py test_package.py test_framewalk.py
 python playcheck.py --html dist/index.html --steps steps.json --out out/playcheck
 python playcheck.py --url http://127.0.0.1:5099/ --steps steps.json --out out/playcheck --skip-video
+python framewalk.py --html dist/index.html --spec framewalk.json --out out/walk
 python package.py --dist dist --zip out/game-itch.zip --credits "with AI agents" --forbid private/forbid.txt
 ```
 
@@ -83,6 +90,7 @@ itch.io embed for a portrait jam: "This file will be played in the browser", vie
 Versions: 0.1.0 (2026-10-16) the shell; 0.2.0 (2026-10-16) music, juice kit, credits strip, reduced motion;
 0.3.0 (2026-10-16) action kit: touch stick, keys held, axis, hits, nearest, pick-one card screen; 0.4.0
 (2026-10-17) look kit: shade and mix, stickers, parallax backdrop, vignette, banners; the packager reads the
-texts it must refuse from a private `--forbid` file; playcheck gained `--url` and `--skip-video` (2026-10-19).
+texts it must refuse from a private `--forbid` file; playcheck gained `--url` and `--skip-video` (2026-10-19);
+framewalk.py added (2026-10-24).
 
 MV2 of Munim, Inc., mv2@munimtech.com. Code Apache-2.0.
