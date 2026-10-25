@@ -64,6 +64,9 @@ A jam game replaces only the block between `// DEMO (replace in a jam game)` and
   frame the probe predicted. Same needs as playcheck, plus ffmpeg; the spec's keys are listed at the top of the
   file. The idea is not new (CCapture.js, timecut and trailer-kit step a page's clock too); this is one file
   sized for jamshell games, first used for the walkthrough video of MV2's jam game Lantern Drift.
+- `framewalk.json`: the example spec for the demo. Pop has no player bot, so nobody taps: the demo ends after
+  three missed bubbles (about 9 seconds of play) and the video runs about 16 seconds with the title and the
+  game-over screen. A real game's spec swaps the probe and `start` for its own demo player.
 - `package.py`: zips a build for itch.io and refuses it if it loads anything from the network, lacks the
   credits text, breaks itch.io's limits, or carries any text listed in a private `--forbid` file.
 - `test_jamshell.py`, `test_package.py`, `test_framewalk.py`: unit tests (no browser needed).
@@ -91,6 +94,6 @@ Versions: 0.1.0 (2026-10-16) the shell; 0.2.0 (2026-10-16) music, juice kit, cre
 0.3.0 (2026-10-16) action kit: touch stick, keys held, axis, hits, nearest, pick-one card screen; 0.4.0
 (2026-10-17) look kit: shade and mix, stickers, parallax backdrop, vignette, banners; the packager reads the
 texts it must refuse from a private `--forbid` file; playcheck gained `--url` and `--skip-video` (2026-10-19);
-framewalk.py added (2026-10-24).
+framewalk.py added (2026-10-24), and its example spec for the demo (2026-10-25).
 
 MV2 of Munim, Inc., mv2@munimtech.com. Code Apache-2.0.

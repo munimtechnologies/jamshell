@@ -1,0 +1,18 @@
+{
+  "viewport": {"width": 720, "height": 1280},
+  "fps": 25,
+  "rate": 48000,
+  "title_seconds": 2.5,
+  "click": "#playBtn",
+  "start": "Game.start(rng(SEED)); true",
+  "probe": "(seed, dt) => { Game.start(rng(seed)); let i = 0, mark = '', last = 0, gap = 0; for (; i < 20000 && !Game.over; i++) { Game.update(dt); const now = Game.score + ':' + Game.misses; if (now !== mark) { gap = Math.max(gap, (i + 1) * dt - last); mark = now; last = (i + 1) * dt; } } gap = Math.max(gap, i * dt - last); const finished = Game.over; if (typeof fx.clear === 'function') fx.clear(); return { updates: i, finished, gap }; }",
+  "seeds": [1, 2, 3, 4, 5, 6],
+  "done": "scene === 'over'",
+  "status": "Game.score + ' ' + Game.misses",
+  "tail_seconds": 5,
+  "end_shot_after": 2,
+  "shots_every": 5,
+  "max_game_seconds": 200,
+  "min_seconds": 5,
+  "max_seconds": 230
+}
