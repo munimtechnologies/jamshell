@@ -1,7 +1,8 @@
 # jamshell
 
 A starter for portrait, touch-first browser games made during game jams, by MV2 of Munim, Inc.
-Apache-2.0 (see LICENSE). Version 0.5.0. Playable demo and downloads: https://munimv2.itch.io/jamshell
+Apache-2.0 (see LICENSE). Version 0.5.1 (`shell.html` is unchanged since 0.5.0; 0.5.1 adds `langleak.py`).
+Playable demo and downloads: https://munimv2.itch.io/jamshell
 
 Made with AI agents (Anthropic Claude) working for MV2 of Munim, Inc., on 2026-10-16 and 2026-10-17, before
 any jam window opened. The code and tests were written by the agents and run in an automated sandbox. It holds
@@ -69,14 +70,17 @@ A jam game replaces only the block between `// DEMO (replace in a jam game)` and
   game-over screen. A real game's spec swaps the probe and `start` for its own demo player.
 - `package.py`: zips a build for itch.io and refuses it if it loads anything from the network, lacks the
   credits text, breaks itch.io's limits, or carries any text listed in a private `--forbid` file.
-- `test_jamshell.py`, `test_package.py`, `test_framewalk.py`: unit tests (no browser needed).
+- `langleak.py` (0.5.1): finds words of the wrong language in a translated jamshell game (see below).
+- `make_fixtures.py` (0.5.1): builds two test pages for langleak from the demo, one leaky and one clean.
+- `test_jamshell.py`, `test_package.py`, `test_framewalk.py`, `test_langleak.py`: unit tests (no browser needed).
 
 ```
-python -m unittest -v test_jamshell.py test_package.py test_framewalk.py
+python -m unittest -v test_jamshell.py test_package.py test_framewalk.py test_langleak.py
 python playcheck.py --html dist/index.html --steps steps.json --out out/playcheck
 python playcheck.py --url http://127.0.0.1:5099/ --steps steps.json --out out/playcheck --skip-video
 python framewalk.py --html dist/index.html --spec framewalk.json --out out/walk
 python package.py --dist dist --zip out/game-itch.zip --credits "with AI agents" --forbid private/forbid.txt
+python langleak.py --html dist/index.html --out out/langleak --langs fr,en --allow "Pop"
 ```
 
 The `--forbid` file holds one text per line, optionally `text<TAB>reason`, with lines starting with `#`
@@ -94,7 +98,8 @@ Versions: 0.1.0 (2026-10-16) the shell; 0.2.0 (2026-10-16) music, juice kit, cre
 0.3.0 (2026-10-16) action kit: touch stick, keys held, axis, hits, nearest, pick-one card screen; 0.4.0
 (2026-10-17) look kit: shade and mix, stickers, parallax backdrop, vignette, banners; the packager reads the
 texts it must refuse from a private `--forbid` file; playcheck gained `--url` and `--skip-video` (2026-10-19);
-framewalk.py added (2026-10-24), and its example spec for the demo (2026-10-25).
+framewalk.py added (2026-10-24), and its example spec for the demo (2026-10-25); 0.5.0 (2026-10-30) language
+kit; 0.5.1 (2026-10-31) langleak.py.
 
 MV2 of Munim, Inc., mv2@munimtech.com. Code Apache-2.0.
 
@@ -114,3 +119,26 @@ shared origin, so two jamshell games there used to share one best score.
 
 Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. on 2026-10-30, before any jam window, and
 checked in Chromium with French and English browser languages. Apache-2.0.
+
+## langleak (0.5.1)
+
+Opting in to a second language is easy; forgetting one English string is easier. A how-to line written as a
+plain string, or an `fx.banner("Go!", ...)` that never went through `say()`, still shows in English on the French
+screen, and a quick look at the title often misses it. `langleak.py` plays the page once per language (browser
+locale and `?lang=`): title, a few seconds of taps, pause, game over. In each scene it keeps the page's visible
+text and every string drawn on the canvas (it records `fillText` and `strokeText` before the game's own script
+runs), then flags strings that look like another language:
+- in French: common English words that are not also everyday French (so "score", "pause", "record" and "bonus"
+  pass), and any English phrase of the shell's or the game's words whose French differs;
+- in English: common French words and accented letters;
+- in every language: `say()` keys that fell back to English, and `Game.words` keys missing from one language.
+
+It writes `report.json` and a screenshot per scene and language, and exits 1 if anything was flagged. Names that
+stay the same in every language go in `--allow`. It is a word-list heuristic for English and French, not a
+language detector: look at the screenshots too.
+
+Checked on 2026-10-31 in a sealed container (Chromium via Playwright 1.47) against two pages made from the 0.5.0
+demo by `make_fixtures.py`: the clean page, with every string through `say()`, passed in both languages; the
+leaky page, which offers French but keeps the demo's English name, how-to and banners, was flagged on exactly
+those three strings in French ("Tap the bubbles ...", "Go!", "pop the bubbles") and on nothing in English, with
+no page errors. Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. Apache-2.0.
