@@ -195,10 +195,10 @@ class ShellTests(unittest.TestCase):
         self.assertIn("pointer-events: none", css)
 
     def test_version_is_consistent(self):
-        self.assertIn('const VERSION = "0.4.0";', SHELL)
-        self.assertIn("jamshell 0.4.0:", SHELL)
+        self.assertIn('const VERSION = "0.5.0";', SHELL)
+        self.assertIn("jamshell 0.5.0:", SHELL)
         readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
-        self.assertIn("0.4.0", readme)
+        self.assertIn("0.5.0", readme)
 
     def test_portrait_stage_and_touch(self):
         self.assertIn("const W = 720, H = 1280;", SHELL)
@@ -219,6 +219,56 @@ class ShellTests(unittest.TestCase):
     def test_selftest_prints_the_pass_line(self):
         self.assertIn('"No problems found."', SHELL)
         self.assertIn('location.hash === "#selftest"', SHELL)
+
+
+class LanguageKitTests(unittest.TestCase):
+    """jamshell 0.5.0: the language kit and per-page storage."""
+
+    @staticmethod
+    def lang_keys(code):
+        block = SHELL[SHELL.index("const LANGS = {"):]
+        block = block[:block.index("\n};")]
+        part = block[block.index("\n  %s: {" % code) + 1:]
+        nxt = re.search(r"\n  [a-z]{2}: \{", part)
+        return set(re.findall(r'\b([A-Za-z]+): "', part[:nxt.start()] if nxt else part))
+
+    def test_language_kit_is_in_the_shell(self):
+        shell = SHELL[:SHELL.index("// DEMO (replace in a jam game)")]
+        for name in ("const LANGS = {", "function fmt(", "function say(", "function pickLang(", "function addWords(",
+                     "function setLang(", '<button id="langBtn" class="btn small hidden"'):
+            self.assertIn(name, shell)
+        # the kit is defined before the sound switch first draws its label
+        self.assertLess(SHELL.index("const LANGS = {"), SHELL.index("sound.showLabel();"))
+
+    def test_english_and_french_have_the_same_words(self):
+        en, fr = self.lang_keys("en"), self.lang_keys("fr")
+        self.assertEqual(en, fr)
+        self.assertGreaterEqual(len(en), 15)
+        # every word the page marks with data-say exists
+        self.assertLessEqual(set(re.findall(r'data-say="(\w+)"', SHELL)), en)
+
+    def test_english_reads_as_before(self):
+        for line in ('sound: "Sound: {0}"', 'score: "Score {0} · best {1}"', 'best: "Best: {0}"', 'play: "Play"'):
+            self.assertIn(line, SHELL)
+        credits = re.search(r'<div id="credits" data-say="credits">(.*?)</div>', SHELL).group(1)
+        self.assertIn("credits: %s" % json.dumps(credits, ensure_ascii=False), SHELL)
+
+    def test_games_opt_in(self):
+        self.assertIn('let lang = "en", offered = ["en"];', SHELL)
+        after = SHELL[SHELL.index("end of DEMO"):]
+        self.assertIn("addWords(Game.words);", after)
+        self.assertIn('setLang(pickLang(new URLSearchParams(location.search).get("lang"), store.get("lang", null),', after)
+
+    def test_storage_is_per_page(self):
+        # itch.io serves its HTML games from one shared origin, so keys carry the page's path
+        self.assertIn('key(k) { return "jamshell." + location.pathname + "#" + k; },', SHELL)
+        self.assertNotIn('localStorage.getItem("jamshell." + k)', SHELL)
+
+    def test_steps_switch_language(self):
+        spec = json.load(open(os.path.join(HERE, "steps.json"), encoding="utf-8"))
+        saves = {s.get("save") for s in spec["steps"]}
+        for name in ("lang_default", "lang_button", "lang_french", "lang_back"):
+            self.assertIn(name, saves)
 
 
 if __name__ == "__main__":

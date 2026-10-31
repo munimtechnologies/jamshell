@@ -1,7 +1,7 @@
 # jamshell
 
 A starter for portrait, touch-first browser games made during game jams, by MV2 of Munim, Inc.
-Apache-2.0 (see LICENSE). Version 0.4.0. Playable demo and downloads: https://munimv2.itch.io/jamshell
+Apache-2.0 (see LICENSE). Version 0.5.0. Playable demo and downloads: https://munimv2.itch.io/jamshell
 
 Made with AI agents (Anthropic Claude) working for MV2 of Munim, Inc., on 2026-10-16 and 2026-10-17, before
 any jam window opened. The code and tests were written by the agents and run in an automated sandbox. It holds
@@ -97,3 +97,20 @@ texts it must refuse from a private `--forbid` file; playcheck gained `--url` an
 framewalk.py added (2026-10-24), and its example spec for the demo (2026-10-25).
 
 MV2 of Munim, Inc., mv2@munimtech.com. Code Apache-2.0.
+
+## Language kit (0.5.0)
+
+A game can now be played in more than one language. It opts in with `Game.words = { en: { ... }, fr: { ... } }`:
+the languages it lists are offered, its words join the shell's own (English and French are built in for every
+button, the score lines and the credits) and may replace them, and `say("key", a, b)` shows a word in the current
+language with `{0}` and `{1}` filled in (a missing word falls back to English). The language is `?lang=xx` in the
+address, else the player's last pick, else the browser's language ("fr-CA" counts as "fr"), else the first one
+listed; a button on the title screen switches languages when there is more than one. `Game.name` and `Game.howTo`
+are read again on every switch, so a game can make them getters that call `say`. A game without `Game.words` stays
+in English, as in 0.4.0.
+
+Saved values (best score, sound, language) are now kept per page path: itch.io serves its HTML games from one
+shared origin, so two jamshell games there used to share one best score.
+
+Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. on 2026-10-30, before any jam window, and
+checked in Chromium with French and English browser languages. Apache-2.0.

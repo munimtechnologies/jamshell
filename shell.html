@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#101624">
 <title>jamshell</title>
-<!-- jamshell 0.4.0: a starter for portrait, touch-first browser games made in jams. Apache-2.0.
+<!-- jamshell 0.5.0: a starter for portrait, touch-first browser games made in jams. Apache-2.0.
      Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude), before any jam window; it holds no gameplay.
      A jam game replaces the DEMO block (marked below) and keeps the rest. Everything runs offline from this
      one file: no network loads, sound and music are synthesized, art is drawn in code. -->
@@ -56,27 +56,28 @@
   <div id="title" class="layer">
     <h1 id="gameName">jamshell</h1>
     <p id="howTo">Tap to play.</p>
-    <button id="playBtn" class="btn" type="button">Play</button>
+    <button id="playBtn" class="btn" type="button" data-say="play">Play</button>
     <button id="soundBtn" class="btn small" type="button">Sound: on</button>
+    <button id="langBtn" class="btn small hidden" type="button"></button>
     <p id="bestLine"></p>
   </div>
   <div id="paused" class="layer hidden">
-    <h1>Paused</h1>
-    <button id="resumeBtn" class="btn" type="button">Resume</button>
-    <button id="quitBtn" class="btn small" type="button">Back to title</button>
+    <h1 data-say="paused">Paused</h1>
+    <button id="resumeBtn" class="btn" type="button" data-say="resume">Resume</button>
+    <button id="quitBtn" class="btn small" type="button" data-say="toTitle">Back to title</button>
   </div>
   <div id="over" class="layer hidden">
-    <h1>Game over</h1>
+    <h1 data-say="gameOver">Game over</h1>
     <p id="overScore"></p>
-    <button id="againBtn" class="btn" type="button">Play again</button>
-    <button id="menuBtn" class="btn small" type="button">Title</button>
+    <button id="againBtn" class="btn" type="button" data-say="again">Play again</button>
+    <button id="menuBtn" class="btn small" type="button" data-say="title">Title</button>
   </div>
   <div id="choose" class="layer hidden" role="dialog" aria-labelledby="chooseTitle">
     <h1 id="chooseTitle"></h1>
     <div id="chooseList"></div>
   </div>
   <div id="toast" role="status"></div>
-  <div id="credits">Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made.</div>
+  <div id="credits" data-say="credits">Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made.</div>
 </div>
 <script>
 "use strict";
@@ -84,7 +85,7 @@
 // SHELL: layout, input, sound, music, juice, look kit, action kit, storage, scenes, self-test. A jam game
 // should not need to change this part.
 // ---------------------------------------------------------------------------------------------------------
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const W = 720, H = 1280;
 const SAFE_BOTTOM = 96;  // the credits strip; keep things the player must see or tap above H - SAFE_BOTTOM
 const $ = id => document.getElementById(id);
@@ -124,11 +125,53 @@ function rng(seed) {
   };
 }
 
-// Storage that never throws (itch.io runs games in an iframe where storage can be blocked).
+// Storage that never throws (itch.io runs games in an iframe where storage can be blocked). Keys carry
+// the page's path: itch.io serves its HTML games from one shared origin, so two games would otherwise
+// share one best score.
 const store = {
-  get(k, d) { try { const v = localStorage.getItem("jamshell." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem("jamshell." + k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } },
+  key(k) { return "jamshell." + location.pathname + "#" + k; },
+  get(k, d) { try { const v = localStorage.getItem(this.key(k)); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch (e) { /* storage blocked */ } },
 };
+
+// Languages (0.5.0): every word the shell shows comes from LANGS, so a game can be played in more than one
+// language. A game opts in with Game.words = { en: { hint: "Tap {0} times" }, fr: { hint: "Touchez {0} fois" } }:
+// the languages it lists are offered, its words join the shell's (and may replace them), and say("hint", 3) shows
+// one in the current language ({0} is the first value after the key, and so on; a missing word falls back to
+// English, then to its own key). The language is ?lang=xx in the address, else the player's last pick, else the
+// browser's language, else the first one listed; a title-screen button switches when there is more than one.
+// Game.name and Game.howTo are read again on each switch, so they may be getters that call say(). A game without
+// Game.words stays in English, as in 0.4.0.
+const LANGS = {
+  en: { lang: "English", play: "Play", sound: "Sound: {0}", on: "on", off: "off", pause: "Pause", paused: "Paused",
+        resume: "Resume", toTitle: "Back to title", gameOver: "Game over", again: "Play again", title: "Title",
+        score: "Score {0} · best {1}", best: "Best: {0}",
+        credits: "Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made." },
+  fr: { lang: "Français", play: "Jouer", sound: "Son : {0}", on: "activé", off: "coupé", pause: "Pause",
+        paused: "Pause", resume: "Reprendre", toTitle: "Retour au titre", gameOver: "Partie terminée",
+        again: "Rejouer", title: "Titre", score: "Score {0} · record {1}", best: "Record : {0}",
+        credits: "Fait par MV2 de Munim, Inc. avec des agents d'IA (Anthropic Claude) : le code, les images et le son sont faits par IA." },
+};
+let lang = "en", offered = ["en"];
+function fmt(s, ...v) { return String(s).replace(/\{(\d+)\}/g, (m, i) => Number(i) < v.length ? String(v[i]) : m); }
+function say(key, ...v) {
+  const d = LANGS[lang] && key in LANGS[lang] ? LANGS[lang] : LANGS.en;
+  return fmt(key in d ? d[key] : key, ...v);
+}
+// The first of the address's ?lang=, the saved pick and the browser's languages ("fr-CA" counts as "fr") that is
+// offered, else the first offered.
+function pickLang(asked, saved, browser, codes) {
+  for (const c of [asked, saved, ...(browser || [])]) {
+    const k = String(c || "").toLowerCase().split("-")[0];
+    if (codes.includes(k)) return k;
+  }
+  return codes[0];
+}
+function addWords(words) {
+  const codes = Object.keys(words || {});
+  if (codes.length) offered = codes;
+  for (const L of codes) LANGS[L] = Object.assign({}, LANGS[L], words[L]);
+}
 
 // Sound: the AudioContext is made on the first tap or key, never before (browsers refuse audio before a gesture
 // and log a warning, which playcheck counts as a failure).
@@ -149,7 +192,7 @@ const sound = {
     o.connect(g).connect(this.ac.destination); o.start(t); o.stop(t + dur + 0.02);
   },
   toggle() { this.on = !this.on; store.set("sound", this.on); this.showLabel(); },
-  showLabel() { $("soundBtn").textContent = "Sound: " + (this.on ? "on" : "off"); },
+  showLabel() { $("soundBtn").textContent = say("sound", say(this.on ? "on" : "off")); },
 };
 sound.showLabel();
 
@@ -561,7 +604,7 @@ function resume() { if (scene === "paused") { show("play"); last = 0; } }
 function end() {
   const best = Math.max(store.get("best", 0), Game.score);
   store.set("best", best);
-  $("overScore").textContent = "Score " + Game.score + " · best " + best;
+  $("overScore").textContent = say("score", Game.score, best);
   show("over"); showBest();
 }
 // The pick-one card screen: choose("Level up!", [{ label: "Faster", detail: "+20% speed" }, ...], i => ...)
@@ -591,11 +634,24 @@ function pick(i) {
   if (done) done(i);
 }
 function setScore(n) { $("score").textContent = String(n); }
-function showBest() { const b = store.get("best", 0); $("bestLine").textContent = b ? "Best: " + b : ""; }
+function showBest() { const b = store.get("best", 0); $("bestLine").textContent = b ? say("best", b) : ""; }
+// Shows the shell, and the game's name and how-to, in language code (an unknown code means the first offered).
+function setLang(code) {
+  lang = LANGS[code] ? code : offered[0];
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll("[data-say]")) el.textContent = say(el.dataset.say);
+  $("pauseBtn").setAttribute("aria-label", say("pause"));
+  $("gameName").textContent = Game.name; $("howTo").textContent = Game.howTo; document.title = Game.name;
+  sound.showLabel(); showBest();
+  const next = offered[(offered.indexOf(lang) + 1) % offered.length], b = $("langBtn");
+  b.textContent = LANGS[next] && LANGS[next].lang ? LANGS[next].lang : next.toUpperCase(); b.lang = next;
+  b.classList.toggle("hidden", offered.length < 2);
+}
 $("playBtn").onclick = start; $("againBtn").onclick = start;
 $("menuBtn").onclick = () => show("title"); $("quitBtn").onclick = () => show("title");
 $("pauseBtn").onclick = pause; $("resumeBtn").onclick = resume;
 $("soundBtn").onclick = () => { sound.unlock(); sound.toggle(); };
+$("langBtn").onclick = () => { setLang($("langBtn").lang); store.set("lang", lang); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
 
 let last = 0;
@@ -694,8 +750,9 @@ const Game = {
 };
 // ---------------------------------------- end of DEMO ----------------------------------------------------
 
-$("gameName").textContent = Game.name; $("howTo").textContent = Game.howTo; document.title = Game.name;
-showBest();
+addWords(Game.words);
+setLang(pickLang(new URLSearchParams(location.search).get("lang"), store.get("lang", null),
+                 navigator.languages || [navigator.language], offered));
 
 // #selftest: shell checks, then the game's own tests. Prints "No problems found." when everything passes.
 function selftest() {
@@ -714,7 +771,23 @@ function selftest() {
   check(lo >= 0 && hi < 1 && hi - lo > 0.9, "random stays in [0, 1)");
   store.set("selftest", { n: 1 }); check(store.get("selftest", null) !== undefined, "storage never throws");
   check(sound.ac === null, "no sound before a gesture");
-  check(/with AI agents/.test($("credits").textContent), "AI credits are shown");
+  check(/with AI agents|avec des agents d'IA/.test($("credits").textContent), "AI credits are shown");
+  // language kit
+  check(pickLang("fr", "en", ["en-US"], ["en", "fr"]) === "fr" && pickLang(null, "fr", ["en-US"], ["en", "fr"]) === "fr",
+        "the address, then the saved pick, choose the language");
+  check(pickLang(null, null, ["de-DE", "fr-CA"], ["en", "fr"]) === "fr" && pickLang("es", null, ["de"], ["en", "fr"]) === "en",
+        "then the browser's languages, then the first offered");
+  check(fmt("{0} of {1}", 3, 5) === "3 of 5" && fmt("{1}", 1) === "{1}", "fmt fills numbered gaps and leaves the rest");
+  check(["lang", "play", "sound", "on", "off", "pause", "paused", "resume", "toTitle", "gameOver", "again", "title",
+         "score", "best", "credits"].every(k => k in LANGS.en && k in LANGS.fr), "English and French have every shell word");
+  const wasLang = lang;
+  setLang("fr");
+  check(document.documentElement.lang === "fr" && $("playBtn").textContent === LANGS.fr.play &&
+        /avec des agents d'IA/.test($("credits").textContent), "French shows on the buttons and in the credits");
+  check(say("score", 3, 9) === fmt(LANGS.fr.score, 3, 9) && say("nope") === "nope", "say fills in a word and names a missing one");
+  setLang("xx"); check(lang === offered[0], "an unknown language falls back to the first offered");
+  setLang(wasLang);
+  check(lang === wasLang && /with AI agents|avec des agents d'IA/.test($("credits").textContent), "the language comes back");
   // easing and tweens
   for (const k in ease) check(near(ease[k](0), 0, 1e-3) && near(ease[k](1), 1, 1e-3), "ease." + k + " runs from 0 to 1");
   check(ease.outBack(0.5) > 1 - 1e-9 || ease.outBack(0.7) > 1, "outBack overshoots");

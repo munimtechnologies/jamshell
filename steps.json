@@ -9,6 +9,13 @@
   "steps": [
     {"wait": 600},
     {"shot": "title"},
+    {"eval": "lang + ' ' + $('langBtn').classList.contains('hidden')", "save": "lang_default", "expect": "en true"},
+    {"eval": "addWords({en: {}, fr: {}}), setLang(lang), $('langBtn').textContent", "only": "phone", "save": "lang_button", "expect": "Français"},
+    {"click": "#langBtn", "only": "phone", "after": 200},
+    {"eval": "[lang, $('playBtn').textContent, $('soundBtn').textContent, document.documentElement.lang].join(' | ')", "only": "phone", "save": "lang_french", "expect": "fr | Jouer | Son : activé | fr"},
+    {"shot": "title-fr", "only": "phone"},
+    {"click": "#langBtn", "only": "phone", "after": 200},
+    {"eval": "[lang, $('playBtn').textContent, store.get('lang', null)].join(' | ')", "only": "phone", "save": "lang_back", "expect": "en | Play | en"},
     {"eval": "document.title", "expect": "Pop"},
     {"eval": "fx.calm", "only": "calm", "save": "calm_mode", "expect": true},
     {"eval": "fx.calm", "only": "phone", "expect": false},
