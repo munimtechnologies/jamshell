@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#101624">
 <title>jamshell</title>
-<!-- jamshell 0.5.0: a starter for portrait, touch-first browser games made in jams. Apache-2.0.
+<!-- jamshell 0.7.0: a starter for touch-first browser games made in jams, portrait or landscape, with an
+     optional level kit for games made of hand-made levels. Apache-2.0.
+     Portrait (720x1280) unless the head has <meta name="jamshell-stage" content="landscape"> (1280x720).
      Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude), before any jam window; it holds no gameplay.
      A jam game replaces the DEMO block (marked below) and keeps the rest. Everything runs offline from this
      one file: no network loads, sound and music are synthesized, art is drawn in code. -->
@@ -44,6 +46,23 @@
   #toast.on { opacity: 1; }
   #selftest { position: fixed; inset: 16px; margin: 0; padding: 18px; background: #000d; color: #fff;
     font: 15px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; z-index: 9; overflow: auto; }
+  /* landscape stage (0.6.0): the same screens packed for 1280x720; the cards sit in two rows of two */
+  body.landscape .layer { gap: 18px; padding: 36px 80px; }
+  body.landscape .layer h1 { font-size: 68px; }
+  body.landscape .layer p { font-size: 32px; max-width: 980px; }
+  body.landscape .btn { min-height: 96px; }
+  body.landscape .btn.small { min-height: 88px; }
+  body.landscape #chooseList { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 20px; }
+  body.landscape .btn.card { width: 520px; min-height: 120px; }
+  body.landscape #toast { top: 130px; }
+  /* level kit (0.7.0): the Levels screen and the Undo and Restart buttons */
+  #levels { background: #101624e6; }
+  #levelGrid { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; max-width: 640px; }
+  .btn.lvl { min-width: 120px; min-height: 104px; padding: 8px; font-size: 44px; }
+  .btn.lvl.done { background: #06d6a0; }
+  .btn.lvl:disabled { opacity: .35; cursor: default; box-shadow: none; }
+  #hud .lvlBtns { display: flex; gap: 14px; }
+  body.landscape #levelGrid { max-width: 1100px; }
 </style>
 </head>
 <body>
@@ -51,12 +70,14 @@
   <canvas id="cv" width="720" height="1280" aria-hidden="true"></canvas>
   <div id="hud" class="hidden">
     <span id="score" aria-live="polite">0</span>
+    <span id="levelBtns" class="lvlBtns"><button id="undoBtn" class="btn small hidden" type="button" data-say="undo">Undo</button><button id="restartBtn" class="btn small hidden" type="button" data-say="restart">Restart</button></span>
     <button id="pauseBtn" class="btn small" type="button" aria-label="Pause">II</button>
   </div>
   <div id="title" class="layer">
     <h1 id="gameName">jamshell</h1>
     <p id="howTo">Tap to play.</p>
     <button id="playBtn" class="btn" type="button" data-say="play">Play</button>
+    <button id="levelsBtn" class="btn small hidden" type="button" data-say="levels">Levels</button>
     <button id="soundBtn" class="btn small" type="button">Sound: on</button>
     <button id="langBtn" class="btn small hidden" type="button"></button>
     <p id="bestLine"></p>
@@ -76,6 +97,11 @@
     <h1 id="chooseTitle"></h1>
     <div id="chooseList"></div>
   </div>
+  <div id="levels" class="layer hidden" role="dialog" aria-labelledby="levelsTitle">
+    <h1 id="levelsTitle" data-say="levels">Levels</h1>
+    <div id="levelGrid"></div>
+    <button id="levelsBack" class="btn small" type="button" data-say="title">Title</button>
+  </div>
   <div id="toast" role="status"></div>
   <div id="credits" data-say="credits">Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made.</div>
 </div>
@@ -85,18 +111,28 @@
 // SHELL: layout, input, sound, music, juice, look kit, action kit, storage, scenes, self-test. A jam game
 // should not need to change this part.
 // ---------------------------------------------------------------------------------------------------------
-const VERSION = "0.5.0";
-const W = 720, H = 1280;
+const VERSION = "0.7.0";
+// The stage (0.6.0): portrait, 720x1280, unless the page asks for landscape, 1280x720, with
+// <meta name="jamshell-stage" content="landscape"> in its head ("1280x720" works too). Anything else is portrait.
+function stageSize(asked) {
+  const s = String(asked || "").trim().toLowerCase();
+  return s === "landscape" || s === "1280x720" ? { w: 1280, h: 720, landscape: true } : { w: 720, h: 1280, landscape: false };
+}
+const STAGE = stageSize((document.querySelector('meta[name="jamshell-stage"]') || {}).content);
+const W = STAGE.w, H = STAGE.h;
 const SAFE_BOTTOM = 96;  // the credits strip; keep things the player must see or tap above H - SAFE_BOTTOM
 const $ = id => document.getElementById(id);
 const stage = $("stage"), cv = $("cv"), cx = cv.getContext("2d");
+stage.style.width = cv.style.width = W + "px"; stage.style.height = cv.style.height = H + "px";
+document.body.classList.toggle("landscape", STAGE.landscape);
 
-// The stage is always 720x1280 logical pixels, scaled to fit the window and centred (letterboxed).
+// The stage is W x H logical pixels (720x1280, or 1280x720 in landscape), scaled to fit the window and
+// centred (letterboxed).
 function fitView(winW, winH) {
   const scale = Math.min(winW / W, winH / H);
   return { scale, left: (winW - W * scale) / 2, top: (winH - H * scale) / 2 };
 }
-// A point in the window -> the same point on the 720x1280 stage.
+// A point in the window -> the same point on the stage.
 function toLogical(clientX, clientY, view) {
   return { x: (clientX - view.left) / view.scale, y: (clientY - view.top) / view.scale };
 }
@@ -146,10 +182,14 @@ const LANGS = {
   en: { lang: "English", play: "Play", sound: "Sound: {0}", on: "on", off: "off", pause: "Pause", paused: "Paused",
         resume: "Resume", toTitle: "Back to title", gameOver: "Game over", again: "Play again", title: "Title",
         score: "Score {0} · best {1}", best: "Best: {0}",
+        levels: "Levels", levelN: "Level {0}", levelClear: "Level clear!", allClear: "All clear!",
+        levelsDone: "{0} of {1} levels cleared", undo: "Undo", restart: "Restart",
         credits: "Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made." },
   fr: { lang: "Français", play: "Jouer", sound: "Son : {0}", on: "activé", off: "coupé", pause: "Pause",
         paused: "Pause", resume: "Reprendre", toTitle: "Retour au titre", gameOver: "Partie terminée",
         again: "Rejouer", title: "Titre", score: "Score {0} · record {1}", best: "Record : {0}",
+        levels: "Niveaux", levelN: "Niveau {0}", levelClear: "Niveau réussi !", allClear: "Tout est réussi !",
+        levelsDone: "{0} niveaux réussis sur {1}", undo: "Annuler", restart: "Recommencer",
         credits: "Fait par MV2 de Munim, Inc. avec des agents d'IA (Anthropic Claude) : le code, les images et le son sont faits par IA." },
 };
 let lang = "en", offered = ["en"];
@@ -477,7 +517,7 @@ const paint = {
   vignette(c, strength = 0.4) {
     const v = this.vig;
     if (!v || v.c !== c || v.k !== strength) {
-      const g = c.createRadialGradient(W / 2, H * 0.45, H * 0.25, W / 2, H * 0.45, H * 0.75);
+      const M = Math.max(W, H), g = c.createRadialGradient(W / 2, H * 0.45, M * 0.25, W / 2, H * 0.45, M * 0.75);
       g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0," + strength + ")");
       this.vig = { c, k: strength, g };
     }
@@ -575,7 +615,9 @@ addEventListener("keydown", e => {
     if (n >= 1 && n <= $("chooseList").children.length) pick(n - 1);
     return;
   }
+  if (e.key === "Escape" && scene === "levels") { show("title"); return; }
   if (e.key === "Escape" || e.key === "p") { if (scene === "play") pause(); else if (scene === "paused") resume(); return; }
+  if (scene === "play" && levels.count && levels.key(e.key)) return;
   if (scene === "play" && Game.onKey) Game.onKey(e.key);
 });
 addEventListener("keyup", e => { held.delete(keyName(e.key)); });
@@ -591,12 +633,13 @@ function toast(text, ms = 1200) {
 let scene = "title";
 function show(name) {
   scene = name;
-  for (const id of ["title", "paused", "over", "choose"]) $(id).classList.toggle("hidden", id !== name);
-  $("hud").classList.toggle("hidden", name !== "play" && name !== "paused" && name !== "choose");
+  for (const id of ["title", "paused", "over", "choose", "levels"]) $(id).classList.toggle("hidden", id !== name);
+  $("hud").classList.toggle("hidden", name !== "play" && name !== "paused" && name !== "choose" && name !== "won");
 }
-function start() {
+function start(at) {
   sound.unlock(); tweens = []; fx.clear(); held.clear(); stick.end();
-  Game.start(rng(Date.now() & 0xffffffff)); setScore(0); show("play");
+  if (levels.count) { levels.go(typeof at === "number" ? at : levels.next()); setScore(Game.score); }
+  else { Game.start(rng(Date.now() & 0xffffffff)); setScore(0); show("play"); }
   if (Game.music && music.song !== Game.music) music.play(Game.music);
 }
 function pause() { if (scene === "play") show("paused"); }
@@ -604,6 +647,7 @@ function resume() { if (scene === "paused") { show("play"); last = 0; } }
 function end() {
   const best = Math.max(store.get("best", 0), Game.score);
   store.set("best", best);
+  $("over").querySelector("h1").textContent = say("gameOver");
   $("overScore").textContent = say("score", Game.score, best);
   show("over"); showBest();
 }
@@ -648,6 +692,8 @@ function setLang(code) {
   b.classList.toggle("hidden", offered.length < 2);
 }
 $("playBtn").onclick = start; $("againBtn").onclick = start;
+$("levelsBtn").onclick = () => { sound.unlock(); levels.menu(); }; $("levelsBack").onclick = () => show("title");
+$("undoBtn").onclick = () => levels.undo(); $("restartBtn").onclick = () => levels.restart();
 $("menuBtn").onclick = () => show("title"); $("quitBtn").onclick = () => show("title");
 $("pauseBtn").onclick = pause; $("resumeBtn").onclick = resume;
 $("soundBtn").onclick = () => { sound.unlock(); sound.toggle(); };
@@ -668,6 +714,183 @@ function frame(t) {
   if (scene === "play") stick.draw(cx);  // the stick stays still while the screen shakes
   requestAnimationFrame(frame);
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// LEVEL KIT (new in 0.7.0), for games made of hand-made levels: puzzles, mazes, platformers. All optional: a
+// game without Game.levels plays exactly as before.
+//   Game.levels = [{ name: "Walk", map: ["#####", "#@ *#", "#####"] }, ...]   any objects; the map is the game's
+//   Game.load(i, level)    required: set the game up for level i (Play goes to the first level not cleared)
+//   Game.snapshot() and Game.restore(state)   optional: plain JSON state; they turn on undo
+//   levels.remember()      call before each move (keeps a snapshot for undo)
+//   levels.win()           call when the level is solved: a banner and a sound, saved progress, then the next
+//                          level or, after the last one, the all-clear screen
+// The shell adds a Levels button and screen (later levels open as earlier ones are cleared; Game.levelsOpen =
+// true opens them all), Undo and Restart buttons in the HUD, and keys: R restarts, Z, U or Backspace undo.
+// Each level opens with a "Level 3" banner (Game.levelBanner = false turns it off). The HUD shows Game.score,
+// so a level game may keep its move count there. Helpers: parseLevel (text maps), fitGrid (a grid laid out on
+// the stage), DIRS and keyDir (arrows and WASD give the names swipes already use: "up", "down", "left",
+// "right") and moveBox (a box moved through a tile map that stops at solid tiles, for platformers).
+// ---------------------------------------------------------------------------------------------------------
+// parseLevel(["#####", "#@ *#"]) or a multi-line string (blank first and last lines are dropped). Short rows are
+// padded with spaces. at(x, y) is null outside the map, set(x, y, ch) changes one cell, find(ch) is the first
+// { x, y } of a character (or null), all(ch) every one, rows() the map as text again.
+function parseLevel(rows) {
+  const lines = Array.isArray(rows) ? rows.map(String) : String(rows).replace(/\r/g, "").split("\n");
+  if (!Array.isArray(rows)) {
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  }
+  const h = lines.length, w = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  const cells = lines.map(l => l.padEnd(w, " ").split(""));
+  const at = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < w && y < h ? cells[y][x] : null;
+  const all = ch => {
+    const out = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (cells[y][x] === ch) out.push({ x, y });
+    return out;
+  };
+  return {
+    w, h, cells, at, all,
+    set(x, y, ch) { if (at(x, y) !== null) cells[y][x] = String(ch); },
+    find(ch) { return all(ch)[0] || null; },
+    rows() { return cells.map(r => r.join("")); },
+  };
+}
+// fitGrid(columns, rows) lays a grid out in square cells of at most maxCell stage pixels, by default between
+// the HUD and the credits strip. centre(gx, gy) is a cell's middle on the stage; cellAt(x, y) is the cell under
+// a stage point, or null outside the grid, so taps can pick cells.
+function fitGrid(gw, gh, box = null, maxCell = 112) {
+  const b = box || { x: 24, y: 140, w: W - 48, h: H - 140 - SAFE_BOTTOM - 12 };
+  const cols = Math.max(1, gw), rows = Math.max(1, gh);
+  const cell = Math.max(1, Math.floor(Math.min(b.w / cols, b.h / rows, maxCell)));
+  const x = Math.round(b.x + (b.w - cell * cols) / 2), y = Math.round(b.y + (b.h - cell * rows) / 2);
+  return {
+    cell, x, y, w: cell * cols, h: cell * rows,
+    centre(gx, gy) { return { x: x + (gx + 0.5) * cell, y: y + (gy + 0.5) * cell }; },
+    cellAt(px, py) {
+      const gx = Math.floor((px - x) / cell), gy = Math.floor((py - y) / cell);
+      return gx >= 0 && gy >= 0 && gx < cols && gy < rows ? { x: gx, y: gy } : null;
+    },
+  };
+}
+const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+const KEY_DIRS = new Map([["ArrowUp", "up"], ["w", "up"], ["ArrowDown", "down"], ["s", "down"],
+                          ["ArrowLeft", "left"], ["a", "left"], ["ArrowRight", "right"], ["d", "right"]]);
+function keyDir(k) { return KEY_DIRS.get(keyName(String(k))) || null; }
+// moveBox(box, dx, dy, solid, tile): moves box ({ x, y, w, h } in stage pixels) by dx, dy through a tile map in
+// which solid(column, row) is true for walls, one axis at a time and in steps of at most half a tile, so a fast
+// box never passes through a thin floor. Returns { x, y }: whether it hit something on each axis (y on the way
+// down means it landed).
+function moveBox(box, dx, dy, solid, tile = 64) {
+  const out = { x: false, y: false }, e = 1e-6;
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / (tile / 2)));
+  for (let s = 0; s < steps; s++) {
+    if (dx && !out.x) {
+      box.x += dx / steps;
+      const r0 = Math.floor(box.y / tile), r1 = Math.floor((box.y + box.h - e) / tile);
+      const c = dx > 0 ? Math.floor((box.x + box.w - e) / tile) : Math.floor(box.x / tile);
+      for (let r = r0; r <= r1; r++) {
+        if (solid(c, r)) { box.x = dx > 0 ? c * tile - box.w : (c + 1) * tile; out.x = true; break; }
+      }
+    }
+    if (dy && !out.y) {
+      box.y += dy / steps;
+      const c0 = Math.floor(box.x / tile), c1 = Math.floor((box.x + box.w - e) / tile);
+      const r = dy > 0 ? Math.floor((box.y + box.h - e) / tile) : Math.floor(box.y / tile);
+      for (let c = c0; c <= c1; c++) {
+        if (solid(c, r)) { box.y = dy > 0 ? r * tile - box.h : (r + 1) * tile; out.y = true; break; }
+      }
+    }
+  }
+  return out;
+}
+const levels = {
+  at: 0, stack: [], pause: 1.4,
+  get list() { return Array.isArray(Game.levels) ? Game.levels : []; },
+  get count() { return this.list.length; },
+  label(i) { return say("levelN", i + 1); },
+  // the cleared levels, saved per page (a damaged or foreign value counts as none cleared)
+  cleared() {
+    const d = store.get("levels", []);
+    return Array.isArray(d) ? d.filter(n => Number.isInteger(n) && n >= 0 && n < this.count) : [];
+  },
+  isOpen(i) { return i >= 0 && i < this.count && (!!Game.levelsOpen || i <= Math.max(-1, ...this.cleared()) + 1); },
+  next() {
+    const d = this.cleared();
+    for (let i = 0; i < this.count; i++) if (!d.includes(i) && this.isOpen(i)) return i;
+    return 0;
+  },
+  go(i) {
+    i = clamp(Math.floor(Number(i)) || 0, 0, Math.max(0, this.count - 1));
+    this.at = i; this.stack = []; tweens = []; fx.clear(); held.clear(); stick.end();
+    Game.over = false;
+    Game.load(i, this.list[i]);
+    show("play"); last = 0;
+    if (Game.levelBanner !== false) fx.banner(this.label(i), (this.list[i] && this.list[i].name) || "");
+    return i;
+  },
+  restart() {
+    if (scene !== "play") return false;
+    this.go(this.at); sound.tone(300, 0.12, "triangle", 0.12, 200);
+    return true;
+  },
+  remember() {
+    if (!Game.snapshot) return;
+    this.stack.push(JSON.stringify(Game.snapshot()));
+    if (this.stack.length > 2000) this.stack.shift();
+  },
+  undo() {
+    if (scene !== "play" || !Game.restore || !this.stack.length) return false;
+    Game.restore(JSON.parse(this.stack.pop())); sound.tone(330, 0.08, "triangle", 0.12, 250);
+    return true;
+  },
+  // the level keys; true means the key was used and the game does not get it
+  key(k) {
+    const c = keyName(String(k));
+    if (c === "r") return this.restart();
+    if ((c === "z" || c === "u" || c === "Backspace") && Game.restore) { this.undo(); return true; }
+    return false;
+  },
+  win() {
+    if (scene !== "play") return false;
+    const i = this.at, done = this.cleared();
+    if (!done.includes(i)) { done.push(i); store.set("levels", done.sort((a, b) => a - b)); }
+    show("won"); fx.banner(say("levelClear"), this.label(i), this.pause + 0.2); fx.flash("#ffffff", 0.3);
+    sound.tone(523, 0.4, "triangle", 0.2, 1046);
+    const lastOne = i >= this.count - 1;
+    tween({ k: 0 }, { k: 1 }, this.pause, ease.linear, () => {
+      if (scene === "won") { if (lastOne) this.finish(); else this.go(i + 1); }
+    });
+    return true;
+  },
+  finish() {
+    $("over").querySelector("h1").textContent = say("allClear");
+    $("overScore").textContent = say("levelsDone", this.cleared().length, this.count);
+    show("over"); showBest();
+  },
+  // the Levels screen: one numbered button per level; locked levels are greyed out, cleared ones green
+  menu() {
+    const grid = $("levelGrid"), done = this.cleared();
+    grid.textContent = "";
+    this.list.forEach((lv, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn lvl" + (done.includes(i) ? " done" : "");
+      b.textContent = String(i + 1);
+      b.setAttribute("aria-label", this.label(i) + (lv && lv.name ? ": " + lv.name : ""));
+      b.disabled = !this.isOpen(i);
+      b.onclick = () => start(i);
+      grid.append(b);
+    });
+    show("levels");
+    const first = grid.querySelector("button:not(:disabled)");
+    if (first) first.focus({ preventScroll: true });
+  },
+  setup() {
+    const on = this.count > 0;
+    $("levelsBtn").classList.toggle("hidden", !on);
+    $("restartBtn").classList.toggle("hidden", !on);
+    $("undoBtn").classList.toggle("hidden", !on || !Game.restore);
+  },
+};
 
 // ---------------------------------------------------------------------------------------------------------
 // DEMO (replace in a jam game): "Pop", tap the bubbles before they float away. Only here so the shell can be
@@ -751,6 +974,7 @@ const Game = {
 // ---------------------------------------- end of DEMO ----------------------------------------------------
 
 addWords(Game.words);
+levels.setup();
 setLang(pickLang(new URLSearchParams(location.search).get("lang"), store.get("lang", null),
                  navigator.languages || [navigator.language], offered));
 
@@ -759,9 +983,14 @@ function selftest() {
   const problems = [];
   const check = (ok, what) => { if (!ok) problems.push("FAILED: " + what); };
   const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
-  let v = fitView(720, 1280); check(near(v.scale, 1) && near(v.left, 0) && near(v.top, 0), "720x1280 fills the window");
-  v = fitView(1280, 720); check(near(v.scale, 0.5625) && near(v.left, 437.5) && near(v.top, 0), "landscape window letterboxes");
-  v = fitView(390, 844); const p = toLogical(195, 422, v); check(near(p.x, 360) && near(p.y, 640), "window centre maps to stage centre");
+  let v = fitView(W, H); check(near(v.scale, 1) && near(v.left, 0) && near(v.top, 0), "a window the stage's size is filled");
+  v = fitView(H, W); const s0 = Math.min(W, H) / Math.max(W, H);
+  check(near(v.scale, s0) && near(v.left, (H - W * s0) / 2) && near(v.top, (W - H * s0) / 2), "the other orientation letterboxes");
+  v = fitView(390, 844); const p = toLogical(195, 422, v); check(near(p.x, W / 2) && near(p.y, H / 2), "window centre maps to stage centre");
+  check(stageSize().w === 720 && stageSize("portrait").h === 1280 && stageSize("square").w === 720, "the stage is portrait unless asked");
+  check(stageSize("landscape").w === 1280 && stageSize(" Landscape ").h === 720 && stageSize("1280x720").landscape, "landscape is 1280x720");
+  check(stage.style.width === W + "px" && stage.style.height === H + "px" &&
+        document.body.classList.contains("landscape") === STAGE.landscape, "the stage has the size the page asked for");
   const q = toLogical(v.left, v.top, v); check(near(q.x, 0) && near(q.y, 0), "stage corner maps to 0,0");
   check(classifyGesture(5, 3, 100) === "tap", "a short press is a tap");
   check(classifyGesture(120, 10, 200) === "right" && classifyGesture(-5, -140, 200) === "up", "swipes have directions");
@@ -874,6 +1103,38 @@ function selftest() {
   pick(0); check(got === 1, "a pick with no cards open does nothing");
   choose("Many", [1, 2, 3, 4, 5, 6].map(n => ({ label: "x" + n })), () => {});
   check($("chooseList").children.length === 4, "at most four cards"); pick(0);
+  // level kit
+  const lv = parseLevel(["#####", "#@ o#", "###"]);
+  check(lv.w === 5 && lv.h === 3 && lv.at(1, 1) === "@" && lv.at(4, 2) === " " && lv.at(-1, 0) === null &&
+        lv.at(5, 0) === null && lv.at(1.5, 1) === null, "a text map pads short rows and is null outside");
+  check(JSON.stringify(lv.find("o")) === '{"x":3,"y":1}' && lv.all("#").length === 10 && lv.find("?") === null,
+        "find and all locate characters");
+  lv.set(2, 1, "*"); lv.set(9, 9, "*");
+  check(lv.rows()[1] === "#@*o#" && lv.all("*").length === 1, "set changes one cell and ignores the outside");
+  const lv2 = parseLevel("\n  ##\n  #@\n\n");
+  check(lv2.h === 2 && lv2.w === 4 && lv2.at(3, 1) === "@", "a multi-line map drops blank first and last lines");
+  const gr = fitGrid(10, 5, { x: 0, y: 0, w: 1000, h: 400 }, 999);
+  check(gr.cell === 80 && gr.x === 100 && gr.y === 0 && gr.w === 800 && near(gr.centre(0, 0).x, 140) &&
+        near(gr.centre(0, 0).y, 40), "a grid fits its box and is centred");
+  check(JSON.stringify(gr.cellAt(100, 0)) === '{"x":0,"y":0}' && gr.cellAt(99.5, 0) === null &&
+        JSON.stringify(gr.cellAt(899, 399)) === '{"x":9,"y":4}' && gr.cellAt(900, 0) === null, "cellAt maps points to cells");
+  check(fitGrid(2, 2, { x: 0, y: 0, w: 1000, h: 1000 }, 64).cell === 64, "cells stop at maxCell");
+  const gd = fitGrid(9, 3);
+  check(gd.x >= 0 && gd.x + gd.w <= W && gd.y >= 140 && gd.y + gd.h <= H - SAFE_BOTTOM, "the default grid sits between the HUD and the credits");
+  check(keyDir("ArrowUp") === "up" && keyDir("D") === "right" && keyDir("s") === "down" && keyDir("q") === null &&
+        keyDir("constructor") === null, "arrows and WASD give directions");
+  check(Object.keys(DIRS).every(k => Math.abs(DIRS[k].x) + Math.abs(DIRS[k].y) === 1), "each direction is one step");
+  const solid = (c, r) => r >= 2 || c >= 5, bx = { x: 10, y: 0, w: 8, h: 8 };
+  let mv = moveBox(bx, 0, 50, solid, 10); check(mv.y && !mv.x && bx.y === 12, "a falling box lands on the floor");
+  mv = moveBox(bx, 100, 0, solid, 10); check(mv.x && !mv.y && bx.x === 42, "a box stops at a wall");
+  mv = moveBox(bx, -3, 0, solid, 10); check(!mv.x && !mv.y && bx.x === 39, "a free move goes the whole way");
+  const thin = { x: 0, y: 0, w: 4, h: 4 };
+  mv = moveBox(thin, 0, 100, (c, r) => r === 3, 10); check(mv.y && thin.y === 26, "a fast box does not pass through a thin floor");
+  check(levels.count === (Array.isArray(Game.levels) ? Game.levels.length : 0), "the level count follows the game");
+  if (!levels.count) {
+    check($("levelsBtn").classList.contains("hidden") && $("undoBtn").classList.contains("hidden") &&
+          $("restartBtn").classList.contains("hidden"), "a game without levels shows no level buttons");
+  }
   show("title");
   try { Game.tests(check); } catch (e) { problems.push("game tests threw: " + e); }
   const out = document.createElement("pre"); out.id = "selftest";

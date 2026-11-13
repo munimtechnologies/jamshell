@@ -1,7 +1,7 @@
 # jamshell
 
-A starter for portrait, touch-first browser games made during game jams, by MV2 of Munim, Inc.
-Apache-2.0 (see LICENSE). Version 0.5.1 (`shell.html` is unchanged since 0.5.0; 0.5.1 adds `langleak.py`).
+A starter for touch-first browser games made during game jams (portrait by default, landscape on request), by MV2 of Munim, Inc.
+Apache-2.0 (see LICENSE). Version 0.7.0 (0.6.0 added a landscape stage and 0.7.0 a level kit to `shell.html`; see the sections at the end).
 Playable demo and downloads: https://munimv2.itch.io/jamshell
 
 Made with AI agents (Anthropic Claude) working for MV2 of Munim, Inc., on 2026-10-16 and 2026-10-17, before
@@ -56,6 +56,8 @@ A jam game replaces only the block between `// DEMO (replace in a jam game)` and
 
 - `shell.html`: the starter and its demo.
 - `steps.json`: the scripted playtest for the demo (viewports, taps, drags, probes).
+- `steps-landscape.json` (0.6.0): the playtest for a landscape page.
+- `examples/levels.html` and `steps-levels.json` (0.7.0): a three-level example of the level kit and its playtest.
 - `playcheck.py`: plays any single-file HTML game in headless Chromium, takes screenshots per viewport and
   records gameplay video. Needs `pip install playwright` and `python -m playwright install chromium`; the tests
   below do not.
@@ -92,14 +94,15 @@ A playcheck viewport with `"reduced_motion": true` runs the steps the way a play
 `"drag"` step presses, moves and holds the mouse and checks its `"probe"` before letting go.
 
 itch.io embed for a portrait jam: "This file will be played in the browser", viewport 720 x 1280, tick
-"Mobile friendly" (orientation portrait) and "Fullscreen button".
+"Mobile friendly" (orientation portrait) and "Fullscreen button". For a landscape page use 1280 x 720.
 
 Versions: 0.1.0 (2026-10-16) the shell; 0.2.0 (2026-10-16) music, juice kit, credits strip, reduced motion;
 0.3.0 (2026-10-16) action kit: touch stick, keys held, axis, hits, nearest, pick-one card screen; 0.4.0
 (2026-10-17) look kit: shade and mix, stickers, parallax backdrop, vignette, banners; the packager reads the
 texts it must refuse from a private `--forbid` file; playcheck gained `--url` and `--skip-video` (2026-10-19);
 framewalk.py added (2026-10-24), and its example spec for the demo (2026-10-25); 0.5.0 (2026-10-30) language
-kit; 0.5.1 (2026-10-31) langleak.py.
+kit; 0.5.1 (2026-10-31) langleak.py; 0.6.0 (written 2026-11-11) landscape stage; 0.7.0 (written 2026-11-11,
+released 2026-11-13 after its sandbox playtest) level kit.
 
 MV2 of Munim, Inc., mv2@munimtech.com. Code Apache-2.0.
 
@@ -142,3 +145,76 @@ demo by `make_fixtures.py`: the clean page, with every string through `say()`, p
 leaky page, which offers French but keeps the demo's English name, how-to and banners, was flagged on exactly
 those three strings in French ("Tap the bubbles ...", "Go!", "pop the bubbles") and on nothing in English, with
 no page errors. Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. Apache-2.0.
+
+## Landscape stage (0.6.0)
+
+A game can now use a landscape stage. Put this tag in the page's head:
+
+```html
+<meta name="jamshell-stage" content="landscape">
+```
+
+The stage is then 1280x720 logical pixels instead of 720x1280, and `W` and `H` follow. The title, pause, game-over
+and card screens are packed for the wider shape (the four cards sit in two rows of two), and the window still
+letterboxes the stage and maps taps and drags onto it. Without the tag, or with any other value, the stage stays
+portrait, exactly as in 0.5.x. Landscape suits jams whose players mostly use a desktop browser, such as itch.io
+embeds and judged jams; portrait suits phones.
+
+`steps-landscape.json` is the playtest for a landscape page. It plays a desktop window, a phone held sideways and a
+phone held upright (letterboxed), and checks that every screen fits inside the stage above the credits strip:
+
+```
+python playcheck.py --html dist/index.html --steps steps-landscape.json --out /out --skip-video
+```
+
+Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. on 2026-11-11, before any jam window, and
+checked in Chromium in both orientations before release. Apache-2.0.
+
+## Level kit (0.7.0)
+
+For games made of hand-made levels: puzzles, mazes, platformers. A game opts in by listing its levels:
+
+```js
+const Game = {
+  levels: [{ name: "Walk", map: ["#######", "#@   *#", "#######"] }, /* ... */],
+  load(i, level) {  // set the game up for level i
+    this.map = parseLevel(level.map); this.grid = fitGrid(this.map.w, this.map.h); this.me = this.map.find("@");
+  },
+  snapshot() { return { me: this.me }; },  // optional: plain JSON state, turns on undo
+  restore(s) { this.me = s.me; },
+  // call levels.remember() before each move and levels.win() when the level is solved
+};
+```
+
+The shell then adds:
+
+- a **Levels** button and screen: later levels open as earlier ones are cleared (`Game.levelsOpen = true` opens
+  them all), cleared levels show green, and progress is saved per page;
+- **Play** goes to the first level not cleared yet;
+- **Undo** and **Restart** buttons in the HUD, and keys: R restarts, Z, U or Backspace undo;
+- a "Level 3" banner as each level opens (`Game.levelBanner = false` turns it off), a "Level clear!" banner and
+  sound, then the next level, and an all-clear screen after the last one.
+
+Helpers: `parseLevel` (text maps with `at`, `set`, `find`, `all` and `rows`), `fitGrid` (square cells laid out
+between the HUD and the credits strip, with `centre` and `cellAt` for taps), `DIRS` and `keyDir` (arrows and WASD
+give the same `"up"`, `"down"`, `"left"` and `"right"` that swipes use) and `moveBox` (moves a box through a tile map
+and stops it at solid tiles, in half-tile steps so it never passes through a thin floor, for platformers). A game
+without `Game.levels` plays exactly as before. The level words come in English and French like the rest.
+
+`examples/levels.html` is a three-level example of the kit ("Steps": walk, push a crate, undo) and
+`steps-levels.json` is its playtest, for a portrait or a landscape page:
+
+```
+python playcheck.py --html examples/levels.html --steps steps-levels.json --out /out --skip-video
+```
+
+Made by AI agents (Anthropic Claude) working for MV2 of Munim, Inc. on 2026-11-11, before any jam window; the kit
+holds no game. Checked in Chromium in portrait and landscape before release. Apache-2.0.
+
+Release check (2026-11-13, sealed container on the Dell, Chromium via Playwright 1.47, built from repo commit
+6d7343df): 71 unit tests passed (1 skipped: it needs a private `FORBID_FILE`); the demo played with no errors in
+four portrait and three landscape viewports, reaching game over in each; the "Steps" example played with no errors
+in three viewports each in portrait and landscape (walk, push, undo by key and button, restart, Levels screen
+showing 1 cleared / 2 open / 3 locked, win). An earlier run of the same check on 2026-11-12 failed one landscape
+step because a fixed 16-second wait outran a slow sandbox browser; the playtest now waits for the game-over
+screen instead of a fixed time.

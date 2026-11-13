@@ -1,0 +1,1193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#101624">
+<title>jamshell</title>
+<!-- jamshell 0.7.0: a starter for touch-first browser games made in jams, portrait or landscape, with an
+     optional level kit for games made of hand-made levels. Apache-2.0.
+     Portrait (720x1280) unless the head has <meta name="jamshell-stage" content="landscape"> (1280x720).
+     Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude), before any jam window; it holds no gameplay.
+     A jam game replaces the DEMO block (marked below) and keeps the rest. Everything runs offline from this
+     one file: no network loads, sound and music are synthesized, art is drawn in code. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #101624; color: #eef2f8;
+    font: 16px system-ui, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none;
+    -webkit-user-select: none; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  #stage { position: fixed; left: 0; top: 0; transform-origin: 0 0; width: 720px; height: 1280px; overflow: hidden;
+    background: #18213a; }
+  #cv { position: absolute; inset: 0; width: 720px; height: 1280px; display: block; }
+  .layer { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 28px; text-align: center; padding: 60px; box-sizing: border-box; }
+  .layer.hidden, .hidden { display: none !important; }
+  .layer h1 { font-size: 76px; line-height: 1.05; margin: 0; text-shadow: 0 6px 0 #0006; }
+  .layer p { font-size: 34px; line-height: 1.3; margin: 0; max-width: 600px; }
+  .btn { font: inherit; font-size: 44px; font-weight: 700; min-width: 360px; min-height: 112px; padding: 16px 40px;
+    border: 0; border-radius: 28px; background: #ffd166; color: #1b1b1b; cursor: pointer; box-shadow: 0 8px 0 #0005;
+    transition: transform .08s; }
+  .btn:active { transform: translateY(4px) scale(.98); }
+  .btn:focus-visible { outline: 6px solid #4cc9f0; outline-offset: 6px; }
+  .btn.small { font-size: 30px; min-width: 0; min-height: 88px; padding: 10px 26px; background: #2b3a5e; color: #eef2f8; }
+  /* the pick-one card screen: a dimmed game behind, one big button per option */
+  #choose { background: #101624cc; }
+  #chooseList { display: flex; flex-direction: column; align-items: center; gap: 24px; width: 100%; }
+  .btn.card { width: 580px; min-height: 140px; display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 6px; background: #eef2f8; }
+  .btn.card small { font-size: 28px; font-weight: 500; color: #3a4660; }
+  #hud { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between;
+    align-items: center; padding: 22px 26px; font-size: 40px; font-weight: 700; pointer-events: none; }
+  #hud .btn { pointer-events: auto; }
+  /* the credits sit on their own dark strip (SAFE_BOTTOM stage pixels), so game art never hides them */
+  #credits { position: absolute; left: 0; right: 0; bottom: 0; font-size: 22px; padding: 26px 30px 16px;
+    background: linear-gradient(#10162400, #101624d9 45%); color: #eef2f8cc; pointer-events: none; }
+  #toast { position: absolute; left: 50%; top: 200px; transform: translateX(-50%); font-size: 36px; padding: 14px 28px;
+    border-radius: 18px; background: #000b; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+  #selftest { position: fixed; inset: 16px; margin: 0; padding: 18px; background: #000d; color: #fff;
+    font: 15px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; z-index: 9; overflow: auto; }
+  /* landscape stage (0.6.0): the same screens packed for 1280x720; the cards sit in two rows of two */
+  body.landscape .layer { gap: 18px; padding: 36px 80px; }
+  body.landscape .layer h1 { font-size: 68px; }
+  body.landscape .layer p { font-size: 32px; max-width: 980px; }
+  body.landscape .btn { min-height: 96px; }
+  body.landscape .btn.small { min-height: 88px; }
+  body.landscape #chooseList { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 20px; }
+  body.landscape .btn.card { width: 520px; min-height: 120px; }
+  body.landscape #toast { top: 130px; }
+  /* level kit (0.7.0): the Levels screen and the Undo and Restart buttons */
+  #levels { background: #101624e6; }
+  #levelGrid { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; max-width: 640px; }
+  .btn.lvl { min-width: 120px; min-height: 104px; padding: 8px; font-size: 44px; }
+  .btn.lvl.done { background: #06d6a0; }
+  .btn.lvl:disabled { opacity: .35; cursor: default; box-shadow: none; }
+  #hud .lvlBtns { display: flex; gap: 14px; }
+  body.landscape #levelGrid { max-width: 1100px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv" width="720" height="1280" aria-hidden="true"></canvas>
+  <div id="hud" class="hidden">
+    <span id="score" aria-live="polite">0</span>
+    <span id="levelBtns" class="lvlBtns"><button id="undoBtn" class="btn small hidden" type="button" data-say="undo">Undo</button><button id="restartBtn" class="btn small hidden" type="button" data-say="restart">Restart</button></span>
+    <button id="pauseBtn" class="btn small" type="button" aria-label="Pause">II</button>
+  </div>
+  <div id="title" class="layer">
+    <h1 id="gameName">jamshell</h1>
+    <p id="howTo">Tap to play.</p>
+    <button id="playBtn" class="btn" type="button" data-say="play">Play</button>
+    <button id="levelsBtn" class="btn small hidden" type="button" data-say="levels">Levels</button>
+    <button id="soundBtn" class="btn small" type="button">Sound: on</button>
+    <button id="langBtn" class="btn small hidden" type="button"></button>
+    <p id="bestLine"></p>
+  </div>
+  <div id="paused" class="layer hidden">
+    <h1 data-say="paused">Paused</h1>
+    <button id="resumeBtn" class="btn" type="button" data-say="resume">Resume</button>
+    <button id="quitBtn" class="btn small" type="button" data-say="toTitle">Back to title</button>
+  </div>
+  <div id="over" class="layer hidden">
+    <h1 data-say="gameOver">Game over</h1>
+    <p id="overScore"></p>
+    <button id="againBtn" class="btn" type="button" data-say="again">Play again</button>
+    <button id="menuBtn" class="btn small" type="button" data-say="title">Title</button>
+  </div>
+  <div id="choose" class="layer hidden" role="dialog" aria-labelledby="chooseTitle">
+    <h1 id="chooseTitle"></h1>
+    <div id="chooseList"></div>
+  </div>
+  <div id="levels" class="layer hidden" role="dialog" aria-labelledby="levelsTitle">
+    <h1 id="levelsTitle" data-say="levels">Levels</h1>
+    <div id="levelGrid"></div>
+    <button id="levelsBack" class="btn small" type="button" data-say="title">Title</button>
+  </div>
+  <div id="toast" role="status"></div>
+  <div id="credits" data-say="credits">Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made.</div>
+</div>
+<script>
+"use strict";
+// ---------------------------------------------------------------------------------------------------------
+// SHELL: layout, input, sound, music, juice, look kit, action kit, storage, scenes, self-test. A jam game
+// should not need to change this part.
+// ---------------------------------------------------------------------------------------------------------
+const VERSION = "0.7.0";
+// The stage (0.6.0): portrait, 720x1280, unless the page asks for landscape, 1280x720, with
+// <meta name="jamshell-stage" content="landscape"> in its head ("1280x720" works too). Anything else is portrait.
+function stageSize(asked) {
+  const s = String(asked || "").trim().toLowerCase();
+  return s === "landscape" || s === "1280x720" ? { w: 1280, h: 720, landscape: true } : { w: 720, h: 1280, landscape: false };
+}
+const STAGE = stageSize((document.querySelector('meta[name="jamshell-stage"]') || {}).content);
+const W = STAGE.w, H = STAGE.h;
+const SAFE_BOTTOM = 96;  // the credits strip; keep things the player must see or tap above H - SAFE_BOTTOM
+const $ = id => document.getElementById(id);
+const stage = $("stage"), cv = $("cv"), cx = cv.getContext("2d");
+stage.style.width = cv.style.width = W + "px"; stage.style.height = cv.style.height = H + "px";
+document.body.classList.toggle("landscape", STAGE.landscape);
+
+// The stage is W x H logical pixels (720x1280, or 1280x720 in landscape), scaled to fit the window and
+// centred (letterboxed).
+function fitView(winW, winH) {
+  const scale = Math.min(winW / W, winH / H);
+  return { scale, left: (winW - W * scale) / 2, top: (winH - H * scale) / 2 };
+}
+// A point in the window -> the same point on the stage.
+function toLogical(clientX, clientY, view) {
+  return { x: (clientX - view.left) / view.scale, y: (clientY - view.top) / view.scale };
+}
+let view = fitView(innerWidth, innerHeight);
+function layout() {
+  view = fitView(innerWidth, innerHeight);
+  stage.style.transform = "translate(" + view.left + "px," + view.top + "px) scale(" + view.scale + ")";
+  // keep the canvas sharp on high-density screens
+  const dpr = Math.min(3, Math.max(1, (window.devicePixelRatio || 1) * view.scale));
+  const px = Math.round(W * dpr), py = Math.round(H * dpr);
+  if (cv.width !== px || cv.height !== py) { cv.width = px; cv.height = py; }
+  cx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+}
+addEventListener("resize", layout);
+layout();
+
+// Seeded random numbers (mulberry32), so a self-test or a daily puzzle can be repeated exactly.
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Storage that never throws (itch.io runs games in an iframe where storage can be blocked). Keys carry
+// the page's path: itch.io serves its HTML games from one shared origin, so two games would otherwise
+// share one best score.
+const store = {
+  key(k) { return "jamshell." + location.pathname + "#" + k; },
+  get(k, d) { try { const v = localStorage.getItem(this.key(k)); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch (e) { /* storage blocked */ } },
+};
+
+// Languages (0.5.0): every word the shell shows comes from LANGS, so a game can be played in more than one
+// language. A game opts in with Game.words = { en: { hint: "Tap {0} times" }, fr: { hint: "Touchez {0} fois" } }:
+// the languages it lists are offered, its words join the shell's (and may replace them), and say("hint", 3) shows
+// one in the current language ({0} is the first value after the key, and so on; a missing word falls back to
+// English, then to its own key). The language is ?lang=xx in the address, else the player's last pick, else the
+// browser's language, else the first one listed; a title-screen button switches when there is more than one.
+// Game.name and Game.howTo are read again on each switch, so they may be getters that call say(). A game without
+// Game.words stays in English, as in 0.4.0.
+const LANGS = {
+  en: { lang: "English", play: "Play", sound: "Sound: {0}", on: "on", off: "off", pause: "Pause", paused: "Paused",
+        resume: "Resume", toTitle: "Back to title", gameOver: "Game over", again: "Play again", title: "Title",
+        score: "Score {0} · best {1}", best: "Best: {0}",
+        levels: "Levels", levelN: "Level {0}", levelClear: "Level clear!", allClear: "All clear!",
+        levelsDone: "{0} of {1} levels cleared", undo: "Undo", restart: "Restart",
+        credits: "Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude): the code, art and sound are AI-made." },
+  fr: { lang: "Français", play: "Jouer", sound: "Son : {0}", on: "activé", off: "coupé", pause: "Pause",
+        paused: "Pause", resume: "Reprendre", toTitle: "Retour au titre", gameOver: "Partie terminée",
+        again: "Rejouer", title: "Titre", score: "Score {0} · record {1}", best: "Record : {0}",
+        levels: "Niveaux", levelN: "Niveau {0}", levelClear: "Niveau réussi !", allClear: "Tout est réussi !",
+        levelsDone: "{0} niveaux réussis sur {1}", undo: "Annuler", restart: "Recommencer",
+        credits: "Fait par MV2 de Munim, Inc. avec des agents d'IA (Anthropic Claude) : le code, les images et le son sont faits par IA." },
+};
+let lang = "en", offered = ["en"];
+function fmt(s, ...v) { return String(s).replace(/\{(\d+)\}/g, (m, i) => Number(i) < v.length ? String(v[i]) : m); }
+function say(key, ...v) {
+  const d = LANGS[lang] && key in LANGS[lang] ? LANGS[lang] : LANGS.en;
+  return fmt(key in d ? d[key] : key, ...v);
+}
+// The first of the address's ?lang=, the saved pick and the browser's languages ("fr-CA" counts as "fr") that is
+// offered, else the first offered.
+function pickLang(asked, saved, browser, codes) {
+  for (const c of [asked, saved, ...(browser || [])]) {
+    const k = String(c || "").toLowerCase().split("-")[0];
+    if (codes.includes(k)) return k;
+  }
+  return codes[0];
+}
+function addWords(words) {
+  const codes = Object.keys(words || {});
+  if (codes.length) offered = codes;
+  for (const L of codes) LANGS[L] = Object.assign({}, LANGS[L], words[L]);
+}
+
+// Sound: the AudioContext is made on the first tap or key, never before (browsers refuse audio before a gesture
+// and log a warning, which playcheck counts as a failure).
+const sound = {
+  on: store.get("sound", true), ac: null,
+  unlock() {
+    if (this.ac) { if (this.ac.state === "suspended") this.ac.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) this.ac = new AC();
+  },
+  // tone(frequency Hz, seconds, wave, volume 0-1, slide to Hz)
+  tone(f, dur = 0.12, type = "sine", vol = 0.2, to = 0) {
+    if (!this.on || !this.ac) return;
+    const t = this.ac.currentTime, o = this.ac.createOscillator(), g = this.ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.ac.destination); o.start(t); o.stop(t + dur + 0.02);
+  },
+  toggle() { this.on = !this.on; store.set("sound", this.on); this.showLabel(); },
+  showLabel() { $("soundBtn").textContent = say("sound", say(this.on ? "on" : "off")); },
+};
+sound.showLabel();
+
+// Music: a small synthesized loop (pad, bass, arpeggio, drums) that follows the sound switch and stops while
+// paused. A game sets Game.music = { bpm: 104, key: 57, chords: [0, 5, 3, 4], minor: true, seed: 3 }: key is a
+// MIDI note (57 = A3), chords are scale degrees (0 = the key's own chord), one bar each. music.notes(song, step)
+// is pure, so tests can check a pattern without audio.
+const music = {
+  song: null, step: 0, next: 0, timer: 0, vol: 0.08, bus: null, buf: null,
+  notes(song, step) {
+    const scale = song.minor === false ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
+    const deg = i => scale[((i % 7) + 7) % 7] + 12 * Math.floor(i / 7);
+    const bar = Math.floor(step / 16) % song.chords.length, s = step % 16, d = song.chords[bar];
+    const triad = [deg(d), deg(d + 2), deg(d + 4)].map(n => song.key + n);
+    const pick = rng((song.seed || 1) * 131 + s);  // the same motif every bar, so the loop is catchy
+    const out = [];
+    if (s === 0) for (const n of triad) out.push({ kind: "pad", midi: n, len: 16 });
+    if (s === 0 || s === 8 || (s === 14 && pick() < 0.6)) out.push({ kind: "bass", midi: triad[0] - 12, len: s === 14 ? 2 : 4 });
+    if (s % 2 === 0 && pick() < 0.8) out.push({ kind: "arp", midi: triad[Math.floor(pick() * 3)] + 12 * (pick() < 0.35 ? 2 : 1), len: 2 });
+    if (song.drums !== false) {
+      if (s === 0 || s === 8 || (s === 10 && pick() < 0.4)) out.push({ kind: "kick" });
+      if (s === 4 || s === 12) out.push({ kind: "snare" });
+      if (s % 2 === 0) out.push({ kind: "hat" });
+    }
+    return out;
+  },
+  play(song) { this.stop(); this.song = song; this.step = 0; this.next = 0; this.tick(); this.timer = setInterval(() => this.tick(), 50); },
+  stop() { clearInterval(this.timer); this.timer = 0; this.song = null; },
+  // schedules the next 0.15 s of notes ahead of time, so timer jitter never makes the beat stumble
+  tick() {
+    const ac = sound.ac;
+    if (!this.song || !ac || !sound.on || ac.state !== "running" || scene === "paused") { if (ac) this.next = 0; return; }
+    const spb = 60 / this.song.bpm / 4;  // seconds per step (a 16th note)
+    if (this.next < ac.currentTime) this.next = ac.currentTime + 0.05;
+    while (this.next < ac.currentTime + 0.15) {
+      for (const n of this.notes(this.song, this.step)) this.voice(n, this.next, spb);
+      this.next += spb; this.step++;
+    }
+  },
+  voice(n, t, spb) {
+    const ac = sound.ac;
+    if (!this.bus) { this.bus = ac.createGain(); this.bus.connect(ac.destination); }
+    this.bus.gain.value = this.vol;
+    if (!n.midi) return this.drum(n.kind, t);
+    const o = ac.createOscillator(), g = ac.createGain(), len = n.len * spb;
+    o.type = n.kind === "bass" ? "triangle" : n.kind === "pad" ? "sine" : "square";
+    o.frequency.setValueAtTime(440 * Math.pow(2, (n.midi - 69) / 12), t);
+    const peak = n.kind === "arp" ? 0.18 : n.kind === "pad" ? 0.22 : 0.8;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + (n.kind === "pad" ? 0.3 : 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(this.bus); o.start(t); o.stop(t + len + 0.05);
+  },
+  drum(kind, t) {
+    const ac = sound.ac, g = ac.createGain();
+    if (kind === "kick") {
+      const o = ac.createOscillator();
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.connect(g).connect(this.bus); o.start(t); o.stop(t + 0.2);
+      return;
+    }
+    if (!this.buf) {
+      this.buf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.25), ac.sampleRate);
+      const d = this.buf.getChannelData(0), r = rng(5);
+      for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1;
+    }
+    const src = ac.createBufferSource(), hp = ac.createBiquadFilter(), len = kind === "hat" ? 0.04 : 0.14;
+    src.buffer = this.buf; hp.type = "highpass"; hp.frequency.value = kind === "hat" ? 7000 : 1500;
+    g.gain.setValueAtTime(kind === "hat" ? 0.2 : 0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    src.connect(hp).connect(g).connect(this.bus); src.start(t); src.stop(t + len + 0.02);
+  },
+};
+
+// Easing curves (t from 0 to 1) and tweens: tween(obj, { x: 300, alpha: 0 }, 0.4, ease.outBack, done).
+const ease = {
+  linear: t => t,
+  inQuad: t => t * t,
+  outQuad: t => t * (2 - t),
+  inOutQuad: t => t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t),
+  outCubic: t => 1 - Math.pow(1 - t, 3),
+  outBack: t => { const u = t - 1; return 1 + u * u * (2.70158 * u + 1.70158); },
+  outElastic: t => t <= 0 || t >= 1 ? t : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * 2 * Math.PI / 3) + 1,
+  outBounce: t => {
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+    return n * (t -= 2.625 / d) * t + 0.984375;
+  },
+};
+let tweens = [];
+function tween(obj, to, dur, curve = ease.outQuad, done = null) {
+  const from = {};
+  for (const k in to) from[k] = obj[k];
+  const tw = { obj, from, to, dur: Math.max(1e-6, dur), t: 0, curve, done };
+  tweens.push(tw);
+  return tw;
+}
+function stepTweens(dt) {
+  const finished = [];
+  for (const tw of tweens) {
+    tw.t = Math.min(tw.dur, tw.t + dt);
+    const k = tw.t >= tw.dur ? 1 : tw.curve(tw.t / tw.dur);
+    for (const p in tw.to) tw.obj[p] = tw.from[p] + (tw.to[p] - tw.from[p]) * k;
+    if (tw.t >= tw.dur) finished.push(tw);
+  }
+  if (!finished.length) return;
+  tweens = tweens.filter(tw => !finished.includes(tw));
+  for (const tw of finished) if (tw.done) tw.done(tw.obj);
+}
+
+// Juice, drawn over the game: fx.burst(x, y, "#ffd166") sparks, fx.text(x, y, "+10") a rising number,
+// fx.shake(12) the camera, fx.flash("#fff") the screen, fx.banner("Level 2", "faster") a ribbon across the
+// middle. Everything fades on its own. Players who ask their system for reduced motion get no shake, only a
+// faint flash, and banners that fade in place instead of sliding.
+const fx = {
+  parts: [], texts: [], banners: [], shakeAmp: 0, flashColor: "#fff", flashAlpha: 0, rand: rng(99),
+  calm: !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches),
+  burst(x, y, color = "#ffd166", n = 18, speed = 420, size = 9, life = 0.6) {
+    for (let i = 0; i < n; i++) {
+      const a = this.rand() * Math.PI * 2, v = speed * (0.35 + 0.65 * this.rand());
+      this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, r: size * (0.5 + this.rand()), life, max: life, color });
+    }
+    if (this.parts.length > 600) this.parts.splice(0, this.parts.length - 600);
+  },
+  text(x, y, s, color = "#ffffff", px = 52) { this.texts.push({ x, y, s: String(s), color, px, life: 0.9, max: 0.9 }); },
+  // one banner at a time: a new one replaces the one showing
+  banner(title, sub = "", secs = 1.6) { this.banners = [{ title: String(title), sub: String(sub), life: secs, max: secs }]; },
+  shake(amount = 10) { if (!this.calm) this.shakeAmp = Math.min(40, Math.max(this.shakeAmp, amount)); },
+  flash(color = "#ffffff", alpha = 0.45) { this.flashColor = color; this.flashAlpha = this.calm ? Math.min(alpha, 0.12) : alpha; },
+  clear() { this.parts = []; this.texts = []; this.banners = []; this.shakeAmp = 0; this.flashAlpha = 0; },
+  update(dt) {
+    const drag = Math.pow(0.08, dt);
+    for (const p of this.parts) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= drag; p.vy = p.vy * drag + 700 * dt; }
+    this.parts = this.parts.filter(p => p.life > 0);
+    for (const t of this.texts) { t.life -= dt; t.y -= 110 * dt; }
+    this.texts = this.texts.filter(t => t.life > 0);
+    for (const b of this.banners) b.life -= dt;
+    this.banners = this.banners.filter(b => b.life > 0);
+    this.shakeAmp = this.shakeAmp > 0.3 ? this.shakeAmp * Math.pow(0.002, dt) : 0;
+    this.flashAlpha = Math.max(0, this.flashAlpha - dt * 2.5);
+  },
+  offset() {
+    if (!this.shakeAmp) return { x: 0, y: 0 };
+    return { x: (this.rand() * 2 - 1) * this.shakeAmp, y: (this.rand() * 2 - 1) * this.shakeAmp };
+  },
+  draw(c) {
+    for (const p of this.parts) {
+      const k = Math.max(0, p.life / p.max);
+      c.globalAlpha = k; c.fillStyle = p.color;
+      c.beginPath(); c.arc(p.x, p.y, p.r * (0.4 + 0.6 * k), 0, Math.PI * 2); c.fill();
+    }
+    for (const t of this.texts) {
+      const k = t.life / t.max;  // 1 -> 0; the number pops in big, then settles and fades
+      c.globalAlpha = Math.min(1, k * 2.5);
+      paint.text(c, t.s, t.x, t.y, Math.round(t.px * (k > 0.8 ? 1 + (k - 0.8) * 2 : 1)), t.color);
+    }
+    for (const b of this.banners) {
+      // slides in from the left, holds, slides out to the right; with reduced motion it only fades
+      const t = 1 - b.life / b.max, inK = Math.min(1, t / 0.2), outK = Math.max(0, (t - 0.8) / 0.2);
+      const dx = this.calm ? 0 : (ease.outCubic(inK) - 1) * W + ease.inQuad(outK) * W;
+      c.globalAlpha = this.calm ? Math.min(1, inK * 2, (1 - outK) * 2) : 1;
+      const y = H * 0.38, low = b.sub ? 112 : 76;
+      c.fillStyle = "rgba(16,22,36,.82)"; c.fillRect(dx - 40, y - 76, W + 80, 76 + low);
+      c.fillStyle = "#ffd166"; c.fillRect(dx - 40, y - 82, W + 80, 6); c.fillRect(dx - 40, y + low, W + 80, 6);
+      paint.text(c, b.title, W / 2 + dx, y, 80, "#ffffff");
+      if (b.sub) paint.text(c, b.sub, W / 2 + dx, y + 66, 36, "#ffd166");
+    }
+    c.globalAlpha = 1;
+    if (this.flashAlpha > 0) { c.globalAlpha = this.flashAlpha; c.fillStyle = this.flashColor; c.fillRect(-50, -50, W + 100, H + 100); c.globalAlpha = 1; }
+  },
+};
+
+// Look kit (new in 0.4.0): colour maths, sticker shapes, a parallax backdrop and a vignette, so a 48-hour game
+// can look finished. Colours are "#rgb" or "#rrggbb" strings ("#rrggbbaa" keeps its alpha).
+function hexParts(s) {
+  let h = String(s).replace("#", "");
+  if (h.length === 3) h = h.replace(/./g, ch => ch + ch);
+  return { rgb: [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0), alpha: h.length === 8 ? h.slice(6) : "" };
+}
+function hexOf(rgb, alpha = "") {
+  return "#" + rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("") + alpha;
+}
+// The corners of a regular polygon ("poly", n sides) or a star ("star", n points), pointing up when rot = 0.
+function shapePoints(kind, x, y, r, n = 5, rot = 0) {
+  const pts = [], count = kind === "star" ? n * 2 : n;
+  for (let i = 0; i < count; i++) {
+    const a = rot - Math.PI / 2 + i * Math.PI * 2 / count, d = kind === "star" && i % 2 ? r * 0.48 : r;
+    pts.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d });
+  }
+  return pts;
+}
+// A seeded parallax backdrop: layers of rolling hills from far (pale, slow) to near (dark, fast) and a few
+// twinkles up high. Make it once, bd = makeBackdrop(seed, palettes.dusk), and draw it every frame with
+// paint.backdrop(c, bd, scroll, time); each layer tiles seamlessly, so scroll can grow forever.
+function makeBackdrop(seed, look, layers = 3) {
+  const r = rng(seed), bd = { layers: [], dots: [] }, haze = paint.mix(look.top, look.bottom, 0.75);
+  for (let i = 0; i < layers; i++) {
+    const k = (i + 1) / layers, base = H * (0.6 + 0.2 * i / Math.max(1, layers - 1)), amp = 60 + 60 * k, ys = [];
+    for (let j = 0; j < 8; j++) ys.push(Math.round(base - amp * r()));
+    bd.layers.push({ speed: 0.15 + 0.85 * k, color: paint.shade(haze, -0.12 - 0.42 * k), ys });
+  }
+  for (let i = 0; i < 28; i++) bd.dots.push({ x: r() * W, y: r() * H * 0.42, r: 1.5 + r() * 2.5, tw: r() * 6.283 });
+  return bd;
+}
+
+// Drawing helpers and a few ready palettes.
+const palettes = {
+  dusk:   { top: "#2b2d6e", bottom: "#f28f6b", a: "#ffd166", b: "#ef476f", c: "#4cc9f0", ink: "#fff7ec" },
+  candy:  { top: "#ffd6e8", bottom: "#c1f0ff", a: "#ff5d8f", b: "#7b5cff", c: "#22c3a6", ink: "#2a1f3d" },
+  forest: { top: "#0f2e2a", bottom: "#355e3b", a: "#f4d35e", b: "#ee964b", c: "#95d5b2", ink: "#f1faee" },
+  neon:   { top: "#0b0221", bottom: "#2a0a4a", a: "#00f5d4", b: "#f15bb5", c: "#fee440", ink: "#ffffff" },
+};
+const paint = {
+  sky(c, top, bottom) {
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, top); g.addColorStop(1, bottom);
+    c.fillStyle = g; c.fillRect(-50, -50, W + 100, H + 100);
+  },
+  box(c, x, y, w, h, r, fill, stroke, lw = 4) {
+    c.beginPath();
+    if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h);
+    if (fill) { c.fillStyle = fill; c.fill(); }
+    if (stroke) { c.lineWidth = lw; c.strokeStyle = stroke; c.stroke(); }
+  },
+  glow(c, x, y, r, color, blur = 30) {
+    c.save(); c.shadowColor = color; c.shadowBlur = blur; c.fillStyle = color;
+    c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); c.restore();
+  },
+  text(c, s, x, y, px = 48, color = "#ffffff", align = "center") {
+    c.font = "800 " + px + "px system-ui, 'Segoe UI', Roboto, sans-serif";
+    c.textAlign = align; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(4, px / 7); c.strokeStyle = "rgba(0,0,0,.5)"; c.strokeText(s, x, y);
+    c.fillStyle = color; c.fillText(s, x, y);
+  },
+  // shade("#4cc9f0", -0.4) is 40% darker, +0.4 is 40% lighter; mix(a, b, 0.5) is halfway. Both are pure.
+  shade(hex, k) {
+    const { rgb, alpha } = hexParts(hex), t = Math.max(-1, Math.min(1, k));
+    return hexOf(rgb.map(v => t < 0 ? v * (1 + t) : v + (255 - v) * t), alpha);
+  },
+  mix(a, b, t) {
+    const A = hexParts(a), B = hexParts(b);
+    return hexOf(A.rgb.map((v, i) => v + (B.rgb[i] - v) * t), A.alpha);
+  },
+  // A sticker: a shape with a soft drop shadow, a lighter top, a dark outline and a shine, the look of flat
+  // game art. kind: "circle", "poly" (n sides) or "star" (n points); rot turns it.
+  sticker(c, kind, x, y, r, fill, n = 5, rot = 0) {
+    const pts = kind === "circle" ? null : shapePoints(kind, x, y, r, n, rot);
+    const path = dy => {
+      c.beginPath();
+      if (!pts) c.arc(x, y + dy, r, 0, Math.PI * 2);
+      else pts.forEach((p, i) => i ? c.lineTo(p.x, p.y + dy) : c.moveTo(p.x, p.y + dy));
+      c.closePath();
+    };
+    path(r * 0.14); c.fillStyle = "rgba(0,0,0,.28)"; c.fill();
+    const g = c.createLinearGradient(x, y - r, x, y + r);
+    g.addColorStop(0, this.shade(fill, 0.28)); g.addColorStop(1, this.shade(fill, -0.18));
+    path(0); c.fillStyle = g; c.fill();
+    c.lineJoin = "round"; c.lineWidth = Math.max(3, r * 0.14); c.strokeStyle = this.shade(fill, -0.6); c.stroke();
+    c.fillStyle = "rgba(255,255,255,.45)";
+    c.beginPath(); c.ellipse(x - r * 0.3, y - r * 0.38, r * 0.22, r * 0.12, -0.5, 0, Math.PI * 2); c.fill();
+  },
+  backdrop(c, bd, scroll = 0, time = 0) {
+    c.fillStyle = "#ffffff";
+    for (const d of bd.dots) {
+      c.globalAlpha = 0.3 + 0.3 * Math.sin(time * 2 + d.tw);
+      c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI * 2); c.fill();
+    }
+    c.globalAlpha = 1;
+    const moved = fx.calm ? 0 : scroll;  // players who ask for reduced motion get still hills
+    for (const L of bd.layers) {
+      // a smooth curve through the hill tops, drawn a little wider than two tiles so no edge ever shows
+      const n = L.ys.length, step = W / n, off = -((moved * L.speed) % W + W) % W;
+      const y = i => L.ys[((i % n) + n) % n], x = i => off + i * step;
+      c.fillStyle = L.color; c.beginPath();
+      c.moveTo(x(-0.5), H + 50); c.lineTo(x(-0.5), (y(-1) + y(0)) / 2);
+      for (let i = 0; i <= 2 * n; i++) c.quadraticCurveTo(x(i), y(i), x(i + 0.5), (y(i) + y(i + 1)) / 2);
+      c.lineTo(x(2 * n + 0.5), H + 50); c.closePath(); c.fill();
+    }
+  },
+  // darkens the edges so the eye goes to the middle; strength 0-1
+  vignette(c, strength = 0.4) {
+    const v = this.vig;
+    if (!v || v.c !== c || v.k !== strength) {
+      const M = Math.max(W, H), g = c.createRadialGradient(W / 2, H * 0.45, M * 0.25, W / 2, H * 0.45, M * 0.75);
+      g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0," + strength + ")");
+      this.vig = { c, k: strength, g };
+    }
+    c.fillStyle = this.vig.g; c.fillRect(-50, -50, W + 100, H + 100);
+  },
+};
+
+// Action kit (new in 0.3.0), for games where the player moves: held keys, a floating touch stick, one
+// movement axis that merges both, circle hits, the nearest target, and a pick-one card screen (level-ups,
+// shops, upgrades; see choose() below). A game sets Game.stick = true to turn the stick on.
+const held = new Set();  // keys held down right now; letters are stored lower-case
+const keyName = k => k.length === 1 ? k.toLowerCase() : k;
+// The stick appears wherever a finger (or mouse) goes down and tilts toward the drag, up to R stage pixels.
+const stick = {
+  active: false, ox: 0, oy: 0, x: 0, y: 0, R: 110, dead: 0.15,
+  begin(px, py) { Object.assign(this, { active: true, ox: px, oy: py, x: 0, y: 0 }); },
+  move(px, py) {
+    if (!this.active) return;
+    let dx = (px - this.ox) / this.R, dy = (py - this.oy) / this.R;
+    const m = Math.hypot(dx, dy);
+    if (m < this.dead) { dx = 0; dy = 0; } else if (m > 1) { dx /= m; dy /= m; }
+    this.x = dx; this.y = dy;
+  },
+  end() { this.active = false; this.x = 0; this.y = 0; },
+  draw(c) {
+    if (!this.active) return;
+    c.globalAlpha = 0.3; c.lineWidth = 6; c.strokeStyle = "#ffffff";
+    c.beginPath(); c.arc(this.ox, this.oy, this.R, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.5; c.fillStyle = "#ffffff";
+    c.beginPath(); c.arc(this.ox + this.x * this.R, this.oy + this.y * this.R, 44, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 1;
+  },
+};
+// Where the player wants to go: arrows or WASD (diagonals as fast as straight lines), else the stick.
+function axis() {
+  let x = 0, y = 0;
+  if (held.has("ArrowLeft") || held.has("a")) x -= 1;
+  if (held.has("ArrowRight") || held.has("d")) x += 1;
+  if (held.has("ArrowUp") || held.has("w")) y -= 1;
+  if (held.has("ArrowDown") || held.has("s")) y += 1;
+  const m = Math.hypot(x, y);
+  return m ? { x: x / m, y: y / m } : { x: stick.x, y: stick.y };
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// Two circles ({ x, y, r }) touch.
+function hit(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) <= (a.r || 0) + (b.r || 0); }
+// The closest item of a list to (x, y), or null if none is within maxD.
+function nearest(list, x, y, maxD = Infinity) {
+  let best = null, bd = maxD;
+  for (const it of list) { const d = Math.hypot(it.x - x, it.y - y); if (d <= bd) { best = it; bd = d; } }
+  return best;
+}
+
+// A swipe is a quick, mostly straight move of at least 60 logical pixels; anything else is a tap.
+function classifyGesture(dx, dy, ms) {
+  const d = Math.hypot(dx, dy);
+  if (d < 60 || ms > 600) return d < 30 ? "tap" : "none";
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+}
+
+// sound.unlock() is called from pointerup, clicks and keys only: on touch screens pointerdown is not a gesture
+// the browser accepts for audio, and Escape never is.
+let down = null;
+cv.addEventListener("pointerdown", e => {
+  const p = toLogical(e.clientX, e.clientY, view);
+  down = { x: p.x, y: p.y, t: performance.now() };
+  if (scene !== "play") return;
+  if (Game.stick) {
+    stick.begin(p.x, p.y);
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* keep going without capture */ }  // drags may leave the stage
+  }
+  if (Game.onPress) Game.onPress(p.x, p.y);
+});
+cv.addEventListener("pointermove", e => {
+  if (scene !== "play" || !down) return;
+  const p = toLogical(e.clientX, e.clientY, view);
+  stick.move(p.x, p.y);
+  if (Game.onDrag) Game.onDrag(p.x, p.y);
+});
+addEventListener("pointerup", e => {
+  sound.unlock(); stick.end();
+  if (!down) return;
+  const p = toLogical(e.clientX, e.clientY, view), kind = classifyGesture(p.x - down.x, p.y - down.y, performance.now() - down.t);
+  down = null;
+  if (scene !== "play") return;
+  if (kind === "tap" && Game.onTap) Game.onTap(p.x, p.y);
+  else if (kind !== "tap" && kind !== "none" && Game.onSwipe) Game.onSwipe(kind);
+});
+addEventListener("pointercancel", () => { down = null; stick.end(); });
+addEventListener("keydown", e => {
+  held.add(keyName(e.key));
+  if (e.key !== "Escape") sound.unlock();
+  if (scene === "choose") {  // 1-4 pick a card; Enter and Space work through the focused button
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= $("chooseList").children.length) pick(n - 1);
+    return;
+  }
+  if (e.key === "Escape" && scene === "levels") { show("title"); return; }
+  if (e.key === "Escape" || e.key === "p") { if (scene === "play") pause(); else if (scene === "paused") resume(); return; }
+  if (scene === "play" && levels.count && levels.key(e.key)) return;
+  if (scene === "play" && Game.onKey) Game.onKey(e.key);
+});
+addEventListener("keyup", e => { held.delete(keyName(e.key)); });
+addEventListener("blur", () => { held.clear(); stick.end(); });
+document.addEventListener("contextmenu", e => e.preventDefault());
+
+function toast(text, ms = 1200) {
+  const t = $("toast"); t.textContent = text; t.classList.add("on");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("on"), ms);
+}
+
+// Scenes: title -> play -> (paused | choose) -> over.
+let scene = "title";
+function show(name) {
+  scene = name;
+  for (const id of ["title", "paused", "over", "choose", "levels"]) $(id).classList.toggle("hidden", id !== name);
+  $("hud").classList.toggle("hidden", name !== "play" && name !== "paused" && name !== "choose" && name !== "won");
+}
+function start(at) {
+  sound.unlock(); tweens = []; fx.clear(); held.clear(); stick.end();
+  if (levels.count) { levels.go(typeof at === "number" ? at : levels.next()); setScore(Game.score); }
+  else { Game.start(rng(Date.now() & 0xffffffff)); setScore(0); show("play"); }
+  if (Game.music && music.song !== Game.music) music.play(Game.music);
+}
+function pause() { if (scene === "play") show("paused"); }
+function resume() { if (scene === "paused") { show("play"); last = 0; } }
+function end() {
+  const best = Math.max(store.get("best", 0), Game.score);
+  store.set("best", best);
+  $("over").querySelector("h1").textContent = say("gameOver");
+  $("overScore").textContent = say("score", Game.score, best);
+  show("over"); showBest();
+}
+// The pick-one card screen: choose("Level up!", [{ label: "Faster", detail: "+20% speed" }, ...], i => ...)
+// freezes the game, shows up to four big buttons and calls back with the index picked (tap, click, Enter or
+// keys 1-4), then play goes on. It opens only during play and returns whether it opened.
+let chooseDone = null;
+function choose(title, options, done) {
+  if (scene !== "play" || !options.length) return false;
+  $("chooseTitle").textContent = title;
+  const list = $("chooseList"); list.textContent = "";
+  options.slice(0, 4).forEach((o, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn card";
+    b.append(document.createTextNode((i + 1) + ". " + o.label));
+    if (o.detail) { const s = document.createElement("small"); s.textContent = o.detail; b.append(s); }
+    b.onclick = () => pick(i);
+    list.append(b);
+  });
+  chooseDone = done; stick.end(); held.clear(); show("choose");
+  list.firstChild.focus({ preventScroll: true });  // keyboard players start on the first card
+  return true;
+}
+function pick(i) {
+  if (scene !== "choose") return;
+  const done = chooseDone; chooseDone = null;
+  show("play"); last = 0;
+  if (done) done(i);
+}
+function setScore(n) { $("score").textContent = String(n); }
+function showBest() { const b = store.get("best", 0); $("bestLine").textContent = b ? say("best", b) : ""; }
+// Shows the shell, and the game's name and how-to, in language code (an unknown code means the first offered).
+function setLang(code) {
+  lang = LANGS[code] ? code : offered[0];
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll("[data-say]")) el.textContent = say(el.dataset.say);
+  $("pauseBtn").setAttribute("aria-label", say("pause"));
+  $("gameName").textContent = Game.name; $("howTo").textContent = Game.howTo; document.title = Game.name;
+  sound.showLabel(); showBest();
+  const next = offered[(offered.indexOf(lang) + 1) % offered.length], b = $("langBtn");
+  b.textContent = LANGS[next] && LANGS[next].lang ? LANGS[next].lang : next.toUpperCase(); b.lang = next;
+  b.classList.toggle("hidden", offered.length < 2);
+}
+$("playBtn").onclick = start; $("againBtn").onclick = start;
+$("levelsBtn").onclick = () => { sound.unlock(); levels.menu(); }; $("levelsBack").onclick = () => show("title");
+$("undoBtn").onclick = () => levels.undo(); $("restartBtn").onclick = () => levels.restart();
+$("menuBtn").onclick = () => show("title"); $("quitBtn").onclick = () => show("title");
+$("pauseBtn").onclick = pause; $("resumeBtn").onclick = resume;
+$("soundBtn").onclick = () => { sound.unlock(); sound.toggle(); };
+$("langBtn").onclick = () => { setLang($("langBtn").lang); store.set("lang", lang); };
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+
+let last = 0;
+function frame(t) {
+  const dt = last ? Math.min(0.05, (t - last) / 1000) : 0; last = t;
+  if (scene === "play") { Game.update(dt); setScore(Game.score); if (Game.over) end(); }
+  if (scene !== "paused" && scene !== "choose") { stepTweens(dt); fx.update(dt); }
+  // clear first: a shaken frame would otherwise leave the last frame's pixels along the edges
+  cx.fillStyle = "#101624"; cx.fillRect(0, 0, W, H);
+  const o = fx.offset();
+  cx.save(); cx.translate(o.x, o.y);
+  Game.draw(cx, scene); fx.draw(cx);
+  cx.restore();
+  if (scene === "play") stick.draw(cx);  // the stick stays still while the screen shakes
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// LEVEL KIT (new in 0.7.0), for games made of hand-made levels: puzzles, mazes, platformers. All optional: a
+// game without Game.levels plays exactly as before.
+//   Game.levels = [{ name: "Walk", map: ["#####", "#@ *#", "#####"] }, ...]   any objects; the map is the game's
+//   Game.load(i, level)    required: set the game up for level i (Play goes to the first level not cleared)
+//   Game.snapshot() and Game.restore(state)   optional: plain JSON state; they turn on undo
+//   levels.remember()      call before each move (keeps a snapshot for undo)
+//   levels.win()           call when the level is solved: a banner and a sound, saved progress, then the next
+//                          level or, after the last one, the all-clear screen
+// The shell adds a Levels button and screen (later levels open as earlier ones are cleared; Game.levelsOpen =
+// true opens them all), Undo and Restart buttons in the HUD, and keys: R restarts, Z, U or Backspace undo.
+// Each level opens with a "Level 3" banner (Game.levelBanner = false turns it off). The HUD shows Game.score,
+// so a level game may keep its move count there. Helpers: parseLevel (text maps), fitGrid (a grid laid out on
+// the stage), DIRS and keyDir (arrows and WASD give the names swipes already use: "up", "down", "left",
+// "right") and moveBox (a box moved through a tile map that stops at solid tiles, for platformers).
+// ---------------------------------------------------------------------------------------------------------
+// parseLevel(["#####", "#@ *#"]) or a multi-line string (blank first and last lines are dropped). Short rows are
+// padded with spaces. at(x, y) is null outside the map, set(x, y, ch) changes one cell, find(ch) is the first
+// { x, y } of a character (or null), all(ch) every one, rows() the map as text again.
+function parseLevel(rows) {
+  const lines = Array.isArray(rows) ? rows.map(String) : String(rows).replace(/\r/g, "").split("\n");
+  if (!Array.isArray(rows)) {
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  }
+  const h = lines.length, w = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  const cells = lines.map(l => l.padEnd(w, " ").split(""));
+  const at = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < w && y < h ? cells[y][x] : null;
+  const all = ch => {
+    const out = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (cells[y][x] === ch) out.push({ x, y });
+    return out;
+  };
+  return {
+    w, h, cells, at, all,
+    set(x, y, ch) { if (at(x, y) !== null) cells[y][x] = String(ch); },
+    find(ch) { return all(ch)[0] || null; },
+    rows() { return cells.map(r => r.join("")); },
+  };
+}
+// fitGrid(columns, rows) lays a grid out in square cells of at most maxCell stage pixels, by default between
+// the HUD and the credits strip. centre(gx, gy) is a cell's middle on the stage; cellAt(x, y) is the cell under
+// a stage point, or null outside the grid, so taps can pick cells.
+function fitGrid(gw, gh, box = null, maxCell = 112) {
+  const b = box || { x: 24, y: 140, w: W - 48, h: H - 140 - SAFE_BOTTOM - 12 };
+  const cols = Math.max(1, gw), rows = Math.max(1, gh);
+  const cell = Math.max(1, Math.floor(Math.min(b.w / cols, b.h / rows, maxCell)));
+  const x = Math.round(b.x + (b.w - cell * cols) / 2), y = Math.round(b.y + (b.h - cell * rows) / 2);
+  return {
+    cell, x, y, w: cell * cols, h: cell * rows,
+    centre(gx, gy) { return { x: x + (gx + 0.5) * cell, y: y + (gy + 0.5) * cell }; },
+    cellAt(px, py) {
+      const gx = Math.floor((px - x) / cell), gy = Math.floor((py - y) / cell);
+      return gx >= 0 && gy >= 0 && gx < cols && gy < rows ? { x: gx, y: gy } : null;
+    },
+  };
+}
+const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+const KEY_DIRS = new Map([["ArrowUp", "up"], ["w", "up"], ["ArrowDown", "down"], ["s", "down"],
+                          ["ArrowLeft", "left"], ["a", "left"], ["ArrowRight", "right"], ["d", "right"]]);
+function keyDir(k) { return KEY_DIRS.get(keyName(String(k))) || null; }
+// moveBox(box, dx, dy, solid, tile): moves box ({ x, y, w, h } in stage pixels) by dx, dy through a tile map in
+// which solid(column, row) is true for walls, one axis at a time and in steps of at most half a tile, so a fast
+// box never passes through a thin floor. Returns { x, y }: whether it hit something on each axis (y on the way
+// down means it landed).
+function moveBox(box, dx, dy, solid, tile = 64) {
+  const out = { x: false, y: false }, e = 1e-6;
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / (tile / 2)));
+  for (let s = 0; s < steps; s++) {
+    if (dx && !out.x) {
+      box.x += dx / steps;
+      const r0 = Math.floor(box.y / tile), r1 = Math.floor((box.y + box.h - e) / tile);
+      const c = dx > 0 ? Math.floor((box.x + box.w - e) / tile) : Math.floor(box.x / tile);
+      for (let r = r0; r <= r1; r++) {
+        if (solid(c, r)) { box.x = dx > 0 ? c * tile - box.w : (c + 1) * tile; out.x = true; break; }
+      }
+    }
+    if (dy && !out.y) {
+      box.y += dy / steps;
+      const c0 = Math.floor(box.x / tile), c1 = Math.floor((box.x + box.w - e) / tile);
+      const r = dy > 0 ? Math.floor((box.y + box.h - e) / tile) : Math.floor(box.y / tile);
+      for (let c = c0; c <= c1; c++) {
+        if (solid(c, r)) { box.y = dy > 0 ? r * tile - box.h : (r + 1) * tile; out.y = true; break; }
+      }
+    }
+  }
+  return out;
+}
+const levels = {
+  at: 0, stack: [], pause: 1.4,
+  get list() { return Array.isArray(Game.levels) ? Game.levels : []; },
+  get count() { return this.list.length; },
+  label(i) { return say("levelN", i + 1); },
+  // the cleared levels, saved per page (a damaged or foreign value counts as none cleared)
+  cleared() {
+    const d = store.get("levels", []);
+    return Array.isArray(d) ? d.filter(n => Number.isInteger(n) && n >= 0 && n < this.count) : [];
+  },
+  isOpen(i) { return i >= 0 && i < this.count && (!!Game.levelsOpen || i <= Math.max(-1, ...this.cleared()) + 1); },
+  next() {
+    const d = this.cleared();
+    for (let i = 0; i < this.count; i++) if (!d.includes(i) && this.isOpen(i)) return i;
+    return 0;
+  },
+  go(i) {
+    i = clamp(Math.floor(Number(i)) || 0, 0, Math.max(0, this.count - 1));
+    this.at = i; this.stack = []; tweens = []; fx.clear(); held.clear(); stick.end();
+    Game.over = false;
+    Game.load(i, this.list[i]);
+    show("play"); last = 0;
+    if (Game.levelBanner !== false) fx.banner(this.label(i), (this.list[i] && this.list[i].name) || "");
+    return i;
+  },
+  restart() {
+    if (scene !== "play") return false;
+    this.go(this.at); sound.tone(300, 0.12, "triangle", 0.12, 200);
+    return true;
+  },
+  remember() {
+    if (!Game.snapshot) return;
+    this.stack.push(JSON.stringify(Game.snapshot()));
+    if (this.stack.length > 2000) this.stack.shift();
+  },
+  undo() {
+    if (scene !== "play" || !Game.restore || !this.stack.length) return false;
+    Game.restore(JSON.parse(this.stack.pop())); sound.tone(330, 0.08, "triangle", 0.12, 250);
+    return true;
+  },
+  // the level keys; true means the key was used and the game does not get it
+  key(k) {
+    const c = keyName(String(k));
+    if (c === "r") return this.restart();
+    if ((c === "z" || c === "u" || c === "Backspace") && Game.restore) { this.undo(); return true; }
+    return false;
+  },
+  win() {
+    if (scene !== "play") return false;
+    const i = this.at, done = this.cleared();
+    if (!done.includes(i)) { done.push(i); store.set("levels", done.sort((a, b) => a - b)); }
+    show("won"); fx.banner(say("levelClear"), this.label(i), this.pause + 0.2); fx.flash("#ffffff", 0.3);
+    sound.tone(523, 0.4, "triangle", 0.2, 1046);
+    const lastOne = i >= this.count - 1;
+    tween({ k: 0 }, { k: 1 }, this.pause, ease.linear, () => {
+      if (scene === "won") { if (lastOne) this.finish(); else this.go(i + 1); }
+    });
+    return true;
+  },
+  finish() {
+    $("over").querySelector("h1").textContent = say("allClear");
+    $("overScore").textContent = say("levelsDone", this.cleared().length, this.count);
+    show("over"); showBest();
+  },
+  // the Levels screen: one numbered button per level; locked levels are greyed out, cleared ones green
+  menu() {
+    const grid = $("levelGrid"), done = this.cleared();
+    grid.textContent = "";
+    this.list.forEach((lv, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn lvl" + (done.includes(i) ? " done" : "");
+      b.textContent = String(i + 1);
+      b.setAttribute("aria-label", this.label(i) + (lv && lv.name ? ": " + lv.name : ""));
+      b.disabled = !this.isOpen(i);
+      b.onclick = () => start(i);
+      grid.append(b);
+    });
+    show("levels");
+    const first = grid.querySelector("button:not(:disabled)");
+    if (first) first.focus({ preventScroll: true });
+  },
+  setup() {
+    const on = this.count > 0;
+    $("levelsBtn").classList.toggle("hidden", !on);
+    $("restartBtn").classList.toggle("hidden", !on);
+    $("undoBtn").classList.toggle("hidden", !on || !Game.restore);
+  },
+};
+
+// ---------------------------------------------------------------------------------------------------------
+// DEMO (replace in a jam game): "Pop", tap the bubbles before they float away. Only here so the shell can be
+// played and tested. A game object needs: name, howTo, score, over, start(rand), update(dt), draw(ctx, scene)
+// and any of onTap(x, y), onPress(x, y), onDrag(x, y), onSwipe(dir), onKey(key), plus tests for selftest().
+// Optional: music (a song for the music loop), stick (true turns on the touch stick; read axis() in update).
+// Juice to reach for: fx, tween/ease, paint, palettes. Look: paint.sticker, makeBackdrop + paint.backdrop,
+// paint.vignette, paint.shade/mix, fx.banner. Action games: axis, hit, nearest, clamp, choose.
+// ---------------------------------------------------------------------------------------------------------
+const Game = {
+  // EXAMPLE (jamshell 0.7.0): "Steps", three tiny levels that show the level kit: text maps, a fitted grid,
+  // crates to push, undo, restart, saved progress and the Levels screen. It is only an example of the kit.
+  name: "Steps", howTo: "Reach the star. Arrows, WASD or swipes move; crates can be pushed. Z undoes, R restarts.",
+  music: { bpm: 96, key: 60, chords: [0, 3, 4, 3], minor: false, seed: 4 },
+  score: 0, over: false, look: palettes.forest, map: null, grid: null, me: null, goal: null, crates: [], floor: null,
+  moves: 0, t: 0,
+  levels: [
+    { name: "Walk", map: ["#########", "#@     *#", "#########"] },
+    { name: "Push", map: ["########", "#@ o   #", "#### # #", "   #  *#", "   #####"] },
+    { name: "Down", map: ["#######", "#@    #", "#o#####", "#   * #", "# #####", "###"] },
+  ],
+  load(i, level) {
+    this.map = parseLevel(level.map); this.grid = fitGrid(this.map.w, this.map.h);
+    this.me = this.map.find("@"); this.goal = this.map.find("*"); this.crates = this.map.all("o");
+    this.moves = 0; this.score = 0;
+    // the floor is every cell the player could reach, so the blank margin outside the walls stays empty
+    this.floor = new Set();
+    const todo = [this.me];
+    while (todo.length) {
+      const p = todo.pop(), k = p.x + "," + p.y;
+      if (this.floor.has(k) || this.wall(p.x, p.y)) continue;
+      this.floor.add(k);
+      for (const d of Object.values(DIRS)) todo.push({ x: p.x + d.x, y: p.y + d.y });
+    }
+  },
+  snapshot() { return { me: this.me, crates: this.crates, moves: this.moves }; },
+  restore(s) { this.me = s.me; this.crates = s.crates; this.moves = s.moves; this.score = s.moves; },
+  wall(x, y) { const c = this.map.at(x, y); return c === null || c === "#"; },
+  crateAt(x, y) { return this.crates.findIndex(c => c.x === x && c.y === y); },
+  move(dir) {
+    const d = DIRS[dir];
+    if (scene !== "play" || !d || !this.map) return false;
+    const nx = this.me.x + d.x, ny = this.me.y + d.y, ci = this.crateAt(nx, ny);
+    const blocked = this.wall(nx, ny) || (ci >= 0 && (this.wall(nx + d.x, ny + d.y) || this.crateAt(nx + d.x, ny + d.y) >= 0));
+    if (blocked) { fx.shake(5); sound.tone(110, 0.07, "square", 0.08); return false; }
+    levels.remember();
+    if (ci >= 0) {
+      this.crates = this.crates.map((c, k) => k === ci ? { x: c.x + d.x, y: c.y + d.y } : c);
+      sound.tone(180, 0.08, "sawtooth", 0.08);
+    }
+    this.me = { x: nx, y: ny }; this.moves++; this.score = this.moves;
+    sound.tone(420 + 30 * (this.moves % 5), 0.05, "triangle", 0.1);
+    if (nx === this.goal.x && ny === this.goal.y) {
+      const p = this.grid.centre(nx, ny);
+      fx.burst(p.x, p.y, this.look.a, 30);
+      levels.win();
+    }
+    return true;
+  },
+  onKey(k) { const d = keyDir(k); if (d) this.move(d); },
+  onSwipe(dir) { this.move(dir); },
+  update(dt) { this.t += dt; },
+  draw(c, scene) {
+    paint.sky(c, this.look.top, this.look.bottom);
+    if (this.map) {
+      const g = this.grid, s = g.cell;
+      for (let y = 0; y < this.map.h; y++) {
+        for (let x = 0; x < this.map.w; x++) {
+          const px = g.x + x * s, py = g.y + y * s;
+          if (this.map.at(x, y) === "#") {
+            paint.box(c, px + 2, py + 2, s - 4, s - 4, s * 0.18, paint.shade(this.look.bottom, -0.35), paint.shade(this.look.bottom, -0.6), 3);
+          } else if (this.floor.has(x + "," + y)) {
+            paint.box(c, px + 3, py + 3, s - 6, s - 6, s * 0.14, "rgba(255,255,255,.12)");
+          }
+        }
+      }
+      const gp = g.centre(this.goal.x, this.goal.y);
+      paint.sticker(c, "star", gp.x, gp.y, s * 0.36, this.look.a, 5, fx.calm ? 0 : this.t);
+      for (const cr of this.crates) { const p = g.centre(cr.x, cr.y); paint.sticker(c, "poly", p.x, p.y, s * 0.44, this.look.b, 4, Math.PI / 4); }
+      const mp = g.centre(this.me.x, this.me.y);
+      paint.sticker(c, "circle", mp.x, mp.y, s * 0.34, this.look.c);
+    }
+    paint.vignette(c, 0.35);
+  },
+  tests(check) {
+    const saved = store.get("levels", []);
+    store.set("levels", []);
+    check(levels.count === 3 && levels.next() === 0 && levels.isOpen(0) && !levels.isOpen(1), "only the first level is open at first");
+    levels.go(0);
+    check(scene === "play" && levels.at === 0 && this.me.x === 1 && this.moves === 0, "a level loads from its text map");
+    check(fx.banners.length === 1 && fx.banners[0].title === levels.label(0) && fx.banners[0].sub === "Walk", "a level opens with its banner");
+    check(this.move("left") === false && this.me.x === 1 && this.moves === 0, "walls block");
+    for (let i = 0; i < 5; i++) this.move("right");
+    check(this.me.x === 6 && levels.undo() && this.me.x === 5 && this.moves === 4, "undo steps back one move");
+    check(levels.key("R") === true && this.me.x === 1 && this.moves === 0 && !levels.undo(), "R restarts the level and clears undo");
+    for (let i = 0; i < 6; i++) this.move("right");
+    check(scene === "won" && levels.cleared().join() === "0" && levels.isOpen(1) && !levels.isOpen(2),
+          "the star clears the level and opens the next");
+    check(this.move("left") === false && levels.key("r") === false, "nothing moves while the clear banner shows");
+    stepTweens(levels.pause + 0.05);
+    check(scene === "play" && levels.at === 1 && this.crates.length === 1, "the next level follows on its own");
+    this.move("right"); this.move("right");
+    check(this.me.x === 3 && this.crates[0].x === 4, "a crate is pushed");
+    check(levels.undo() && this.me.x === 2 && this.crates[0].x === 3, "undo puts the crate back");
+    levels.go(2);
+    this.move("down"); this.move("down");
+    check(this.crates[0].y === 4 && this.me.y === 3, "a crate is pushed twice");
+    check(this.move("down") === false && this.me.y === 3, "a crate against a wall does not move");
+    this.move("right"); this.move("right"); this.move("right");
+    check(scene === "won", "the last level is cleared");
+    stepTweens(levels.pause + 0.05);
+    check(scene === "over" && $("over").querySelector("h1").textContent === say("allClear") &&
+          $("overScore").textContent === say("levelsDone", 2, 3), "after the last level comes the all-clear screen");
+    check(levels.next() === 1, "Play goes to the first level not cleared");
+    store.set("levels", [0]); levels.menu();
+    const kids = [...$("levelGrid").children];
+    check(scene === "levels" && kids.length === 3 && kids[0].classList.contains("done") && !kids[1].disabled && kids[2].disabled,
+          "the Levels screen shows cleared, open and locked levels");
+    Game.levelsOpen = true; levels.menu();
+    check([...$("levelGrid").children].every(b => !b.disabled), "levelsOpen opens every level");
+    delete Game.levelsOpen;
+    store.set("levels", saved); this.map = null; tweens = []; fx.clear(); show("title");
+  },
+};
+// ---------------------------------------- end of DEMO ----------------------------------------------------
+
+addWords(Game.words);
+levels.setup();
+setLang(pickLang(new URLSearchParams(location.search).get("lang"), store.get("lang", null),
+                 navigator.languages || [navigator.language], offered));
+
+// #selftest: shell checks, then the game's own tests. Prints "No problems found." when everything passes.
+function selftest() {
+  const problems = [];
+  const check = (ok, what) => { if (!ok) problems.push("FAILED: " + what); };
+  const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
+  let v = fitView(W, H); check(near(v.scale, 1) && near(v.left, 0) && near(v.top, 0), "a window the stage's size is filled");
+  v = fitView(H, W); const s0 = Math.min(W, H) / Math.max(W, H);
+  check(near(v.scale, s0) && near(v.left, (H - W * s0) / 2) && near(v.top, (W - H * s0) / 2), "the other orientation letterboxes");
+  v = fitView(390, 844); const p = toLogical(195, 422, v); check(near(p.x, W / 2) && near(p.y, H / 2), "window centre maps to stage centre");
+  check(stageSize().w === 720 && stageSize("portrait").h === 1280 && stageSize("square").w === 720, "the stage is portrait unless asked");
+  check(stageSize("landscape").w === 1280 && stageSize(" Landscape ").h === 720 && stageSize("1280x720").landscape, "landscape is 1280x720");
+  check(stage.style.width === W + "px" && stage.style.height === H + "px" &&
+        document.body.classList.contains("landscape") === STAGE.landscape, "the stage has the size the page asked for");
+  const q = toLogical(v.left, v.top, v); check(near(q.x, 0) && near(q.y, 0), "stage corner maps to 0,0");
+  check(classifyGesture(5, 3, 100) === "tap", "a short press is a tap");
+  check(classifyGesture(120, 10, 200) === "right" && classifyGesture(-5, -140, 200) === "up", "swipes have directions");
+  check(classifyGesture(120, 0, 900) === "none", "a slow drag is not a swipe");
+  const a = rng(42), b = rng(42); check(a() === b() && a() === b(), "seeded random repeats");
+  const r = rng(3); let lo = 1, hi = 0; for (let i = 0; i < 1000; i++) { const x = r(); lo = Math.min(lo, x); hi = Math.max(hi, x); }
+  check(lo >= 0 && hi < 1 && hi - lo > 0.9, "random stays in [0, 1)");
+  store.set("selftest", { n: 1 }); check(store.get("selftest", null) !== undefined, "storage never throws");
+  check(sound.ac === null, "no sound before a gesture");
+  check(/with AI agents|avec des agents d'IA/.test($("credits").textContent), "AI credits are shown");
+  // language kit
+  check(pickLang("fr", "en", ["en-US"], ["en", "fr"]) === "fr" && pickLang(null, "fr", ["en-US"], ["en", "fr"]) === "fr",
+        "the address, then the saved pick, choose the language");
+  check(pickLang(null, null, ["de-DE", "fr-CA"], ["en", "fr"]) === "fr" && pickLang("es", null, ["de"], ["en", "fr"]) === "en",
+        "then the browser's languages, then the first offered");
+  check(fmt("{0} of {1}", 3, 5) === "3 of 5" && fmt("{1}", 1) === "{1}", "fmt fills numbered gaps and leaves the rest");
+  check(["lang", "play", "sound", "on", "off", "pause", "paused", "resume", "toTitle", "gameOver", "again", "title",
+         "score", "best", "credits"].every(k => k in LANGS.en && k in LANGS.fr), "English and French have every shell word");
+  const wasLang = lang;
+  setLang("fr");
+  check(document.documentElement.lang === "fr" && $("playBtn").textContent === LANGS.fr.play &&
+        /avec des agents d'IA/.test($("credits").textContent), "French shows on the buttons and in the credits");
+  check(say("score", 3, 9) === fmt(LANGS.fr.score, 3, 9) && say("nope") === "nope", "say fills in a word and names a missing one");
+  setLang("xx"); check(lang === offered[0], "an unknown language falls back to the first offered");
+  setLang(wasLang);
+  check(lang === wasLang && /with AI agents|avec des agents d'IA/.test($("credits").textContent), "the language comes back");
+  // easing and tweens
+  for (const k in ease) check(near(ease[k](0), 0, 1e-3) && near(ease[k](1), 1, 1e-3), "ease." + k + " runs from 0 to 1");
+  check(ease.outBack(0.5) > 1 - 1e-9 || ease.outBack(0.7) > 1, "outBack overshoots");
+  const obj = { x: 0, y: 10 }; let doneWith = null;
+  tween(obj, { x: 100 }, 0.5, ease.linear, o => { doneWith = o; });
+  stepTweens(0.25); check(near(obj.x, 50) && obj.y === 10 && doneWith === null, "a tween is halfway at half time and leaves other fields");
+  stepTweens(0.3); check(obj.x === 100 && doneWith === obj && tweens.length === 0, "a tween lands exactly, calls done and is removed");
+  // juice
+  fx.clear(); fx.burst(100, 100, "#fff", 10); fx.text(100, 100, "+5"); fx.shake(20); fx.flash("#fff", 0.5);
+  check(fx.parts.length === 10 && fx.texts.length === 1 && fx.shakeAmp === (fx.calm ? 0 : 20), "fx starts sparks, text and shake");
+  for (let i = 0; i < 20; i++) fx.update(0.05);
+  check(fx.parts.length === 0 && fx.texts.length === 0 && fx.shakeAmp === 0 && fx.flashAlpha === 0, "fx fades to nothing within a second");
+  const calm = fx.calm; fx.calm = true; fx.shake(30); fx.flash("#fff", 0.9);
+  check(fx.shakeAmp === 0 && fx.flashAlpha <= 0.12, "reduced motion means no shake and a faint flash");
+  fx.calm = calm; fx.clear();
+  for (let i = 0; i < 700; i++) fx.burst(0, 0, "#fff", 1);
+  check(fx.parts.length === 600, "sparks are capped at 600"); fx.clear();
+  fx.banner("Level 2", "faster", 1); fx.update(0.5);
+  check(fx.banners.length === 1 && fx.banners[0].title === "Level 2", "a banner stays up for its time");
+  fx.update(0.6); check(fx.banners.length === 0, "then the banner goes");
+  fx.banner("A"); fx.banner("B"); check(fx.banners.length === 1 && fx.banners[0].title === "B", "a new banner replaces the old one");
+  fx.clear(); check(fx.banners.length === 0, "fx.clear removes banners");
+  // look kit
+  check(paint.shade("#808080", -1) === "#000000" && paint.shade("#808080", 1) === "#ffffff", "shade runs from black to white");
+  check(paint.shade("#4cc9f0", 0) === "#4cc9f0" && paint.shade("#fff", -0.5) === "#808080", "shade 0 keeps the colour and #rgb works");
+  check(paint.shade("#ffffff80", -1) === "#00000080" && paint.shade("#123456", -5) === "#000000", "shade keeps alpha and clamps");
+  check(paint.mix("#000000", "#ffffff", 0.5) === "#808080" && paint.mix("#102030", "#405060", 0) === "#102030" &&
+        paint.mix("#102030", "#405060", 1) === "#405060", "mix runs from one colour to the other");
+  const star = shapePoints("star", 100, 100, 50, 5);
+  check(star.length === 10 && near(star[0].x, 100) && near(star[0].y, 50), "a star has 2n corners and points up");
+  check(star.every((pt, i) => near(Math.hypot(pt.x - 100, pt.y - 100), i % 2 ? 24 : 50)), "a star alternates outer and inner corners");
+  const hexagon = shapePoints("poly", 0, 0, 30, 6);
+  check(hexagon.length === 6 && hexagon.every(pt => near(Math.hypot(pt.x, pt.y), 30)), "a polygon's corners sit on its circle");
+  const bd1 = makeBackdrop(5, palettes.dusk);
+  check(JSON.stringify(bd1) === JSON.stringify(makeBackdrop(5, palettes.dusk)) &&
+        JSON.stringify(bd1) !== JSON.stringify(makeBackdrop(6, palettes.dusk)), "a backdrop repeats for its seed");
+  check(bd1.layers.length === 3 && bd1.layers.every((L, i) => !i || L.speed > bd1.layers[i - 1].speed), "near layers move faster");
+  check(bd1.layers.every(L => L.ys.every(y => y > H * 0.4 && y < H)), "hills stay in the lower part of the screen");
+  check(bd1.layers.every((L, i) => !i || hexParts(L.color).rgb.reduce((s, x) => s + x, 0) <
+        hexParts(bd1.layers[i - 1].color).rgb.reduce((s, x) => s + x, 0)), "near layers are darker");
+  const ocv = document.createElement("canvas"); ocv.width = 100; ocv.height = 100;
+  const oc = ocv.getContext("2d", { willReadFrequently: true });  // no readback warning in the console
+  try {
+    paint.sticker(oc, "circle", 50, 50, 30, "#ff0000");
+    const px = oc.getImageData(50, 60, 1, 1).data;
+    check(px[3] === 255 && px[0] > 150 && px[1] < 80 && px[2] < 80, "a sticker paints its own colour");
+    paint.sticker(oc, "star", 50, 50, 30, "#ffd166", 5, 0.3); paint.sticker(oc, "poly", 50, 50, 30, "#ef476f", 6);
+    paint.backdrop(oc, bd1, 12345.6, 3); paint.backdrop(oc, bd1, -77, 0); paint.vignette(oc, 0.5);
+    fx.banner("x", "y"); fx.update(0.4); fx.draw(oc); fx.clear();
+  } catch (e) { problems.push("FAILED: the look kit draws without errors: " + e); }
+  // music
+  const song = { bpm: 100, key: 57, chords: [0, 5, 3, 4], seed: 2 };
+  const n0 = music.notes(song, 0);
+  check(n0.some(n => n.kind === "kick") && n0.some(n => n.kind === "bass") && n0.filter(n => n.kind === "pad").length === 3, "bar start has kick, bass and a chord");
+  check(JSON.stringify(music.notes(song, 37)) === JSON.stringify(music.notes(song, 37)), "the music pattern repeats exactly");
+  const bassOf = bar => music.notes(song, bar * 16).find(n => n.kind === "bass").midi;
+  check(bassOf(0) === 45 && bassOf(1) !== bassOf(0) && bassOf(4) === bassOf(0), "bass follows the chords and loops");
+  let range = true;
+  for (let s = 0; s < 64; s++) for (const n of music.notes(song, s)) if (n.midi && (n.midi < 24 || n.midi > 108)) range = false;
+  check(range, "every note is in a playable range");
+  check(music.notes(Object.assign({}, song, { drums: false }), 4).every(n => n.midi), "drums can be turned off");
+  check(music.song === null, "no music before a gesture");
+  // action kit
+  stick.begin(300, 900); stick.move(300 + 2 * stick.R, 900);
+  check(stick.active && near(stick.x, 1) && near(stick.y, 0), "the stick tops out at full tilt");
+  stick.move(300, 900 + stick.R / 2); check(near(stick.x, 0) && near(stick.y, 0.5), "half a radius is half tilt");
+  stick.move(304, 903); check(stick.x === 0 && stick.y === 0, "a small wobble stays in the dead zone");
+  stick.end(); check(!stick.active && stick.x === 0 && stick.y === 0, "lifting the finger lets the stick go");
+  stick.move(500, 500); check(stick.x === 0 && stick.y === 0, "an idle stick ignores moves");
+  held.clear(); held.add("ArrowRight"); held.add(keyName("W"));
+  let ax = axis(); check(near(ax.x, Math.SQRT1_2) && near(ax.y, -Math.SQRT1_2), "diagonal keys move as fast as straight ones");
+  held.add("ArrowLeft"); ax = axis(); check(near(ax.x, 0) && near(ax.y, -1), "opposite keys cancel");
+  held.clear(); stick.begin(0, 0); stick.move(0, stick.R); ax = axis();
+  check(near(ax.x, 0) && near(ax.y, 1), "without keys the stick drives the axis"); stick.end();
+  check(hit({ x: 0, y: 0, r: 10 }, { x: 16, y: 0, r: 6 }) && !hit({ x: 0, y: 0, r: 10 }, { x: 17, y: 0, r: 6 }), "circles hit when their edges meet");
+  const pts = [{ x: 100, y: 0 }, { x: 30, y: 40 }, { x: -200, y: 0 }];
+  check(nearest(pts, 0, 0) === pts[1] && nearest(pts, 0, 0, 40) === null && nearest([], 0, 0) === null, "nearest finds the closest in range");
+  check(clamp(5, 0, 3) === 3 && clamp(-1, 0, 3) === 0 && clamp(2, 0, 3) === 2, "clamp keeps values in range");
+  check(choose("Pick", [{ label: "A" }], () => {}) === false && scene === "title", "cards open only during play");
+  show("play"); let got = -1;
+  check(choose("Pick", [{ label: "A" }, { label: "B", detail: "the second" }], i => { got = i; }) === true, "cards open during play");
+  check(scene === "choose" && $("chooseList").children.length === 2 && /2\. B/.test($("chooseList").textContent), "one numbered button per option");
+  pick(1); check(got === 1 && scene === "play", "a pick returns its index and play goes on");
+  pick(0); check(got === 1, "a pick with no cards open does nothing");
+  choose("Many", [1, 2, 3, 4, 5, 6].map(n => ({ label: "x" + n })), () => {});
+  check($("chooseList").children.length === 4, "at most four cards"); pick(0);
+  // level kit
+  const lv = parseLevel(["#####", "#@ o#", "###"]);
+  check(lv.w === 5 && lv.h === 3 && lv.at(1, 1) === "@" && lv.at(4, 2) === " " && lv.at(-1, 0) === null &&
+        lv.at(5, 0) === null && lv.at(1.5, 1) === null, "a text map pads short rows and is null outside");
+  check(JSON.stringify(lv.find("o")) === '{"x":3,"y":1}' && lv.all("#").length === 10 && lv.find("?") === null,
+        "find and all locate characters");
+  lv.set(2, 1, "*"); lv.set(9, 9, "*");
+  check(lv.rows()[1] === "#@*o#" && lv.all("*").length === 1, "set changes one cell and ignores the outside");
+  const lv2 = parseLevel("\n  ##\n  #@\n\n");
+  check(lv2.h === 2 && lv2.w === 4 && lv2.at(3, 1) === "@", "a multi-line map drops blank first and last lines");
+  const gr = fitGrid(10, 5, { x: 0, y: 0, w: 1000, h: 400 }, 999);
+  check(gr.cell === 80 && gr.x === 100 && gr.y === 0 && gr.w === 800 && near(gr.centre(0, 0).x, 140) &&
+        near(gr.centre(0, 0).y, 40), "a grid fits its box and is centred");
+  check(JSON.stringify(gr.cellAt(100, 0)) === '{"x":0,"y":0}' && gr.cellAt(99.5, 0) === null &&
+        JSON.stringify(gr.cellAt(899, 399)) === '{"x":9,"y":4}' && gr.cellAt(900, 0) === null, "cellAt maps points to cells");
+  check(fitGrid(2, 2, { x: 0, y: 0, w: 1000, h: 1000 }, 64).cell === 64, "cells stop at maxCell");
+  const gd = fitGrid(9, 3);
+  check(gd.x >= 0 && gd.x + gd.w <= W && gd.y >= 140 && gd.y + gd.h <= H - SAFE_BOTTOM, "the default grid sits between the HUD and the credits");
+  check(keyDir("ArrowUp") === "up" && keyDir("D") === "right" && keyDir("s") === "down" && keyDir("q") === null &&
+        keyDir("constructor") === null, "arrows and WASD give directions");
+  check(Object.keys(DIRS).every(k => Math.abs(DIRS[k].x) + Math.abs(DIRS[k].y) === 1), "each direction is one step");
+  const solid = (c, r) => r >= 2 || c >= 5, bx = { x: 10, y: 0, w: 8, h: 8 };
+  let mv = moveBox(bx, 0, 50, solid, 10); check(mv.y && !mv.x && bx.y === 12, "a falling box lands on the floor");
+  mv = moveBox(bx, 100, 0, solid, 10); check(mv.x && !mv.y && bx.x === 42, "a box stops at a wall");
+  mv = moveBox(bx, -3, 0, solid, 10); check(!mv.x && !mv.y && bx.x === 39, "a free move goes the whole way");
+  const thin = { x: 0, y: 0, w: 4, h: 4 };
+  mv = moveBox(thin, 0, 100, (c, r) => r === 3, 10); check(mv.y && thin.y === 26, "a fast box does not pass through a thin floor");
+  check(levels.count === (Array.isArray(Game.levels) ? Game.levels.length : 0), "the level count follows the game");
+  if (!levels.count) {
+    check($("levelsBtn").classList.contains("hidden") && $("undoBtn").classList.contains("hidden") &&
+          $("restartBtn").classList.contains("hidden"), "a game without levels shows no level buttons");
+  }
+  show("title");
+  try { Game.tests(check); } catch (e) { problems.push("game tests threw: " + e); }
+  const out = document.createElement("pre"); out.id = "selftest";
+  out.textContent = Game.name + " self-test (jamshell " + VERSION + ")\n" + (problems.length ? problems.join("\n") : "No problems found.");
+  out.onclick = () => out.remove();
+  document.body.append(out);
+}
+if (location.hash === "#selftest") selftest();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

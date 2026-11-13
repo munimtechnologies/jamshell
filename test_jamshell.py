@@ -124,7 +124,7 @@ class ShellTests(unittest.TestCase):
 
     def test_music_starts_only_from_play(self):
         # music.play is only called inside start(), which only the Play buttons call
-        begin, finish = SHELL.index("function start() {"), SHELL.index("function pause()")
+        begin, finish = SHELL.index("function start(at) {"), SHELL.index("function pause()")
         calls = [m.start() for m in re.finditer(r"music\.play\(", SHELL)]
         self.assertEqual(len(calls), 1)
         self.assertTrue(begin < calls[0] < finish)
@@ -170,7 +170,7 @@ class ShellTests(unittest.TestCase):
 
     def test_card_screen_freezes_the_game(self):
         self.assertIn('<div id="choose" class="layer hidden"', SHELL)
-        self.assertIn('for (const id of ["title", "paused", "over", "choose"])', SHELL)
+        self.assertIn('for (const id of ["title", "paused", "over", "choose", "levels"])', SHELL)
         frame = SHELL[SHELL.index("function frame(t) {"):]
         frame = frame[:frame.index("requestAnimationFrame(frame);")]
         # Game.update runs only in play, and tweens and sparks stand still behind the cards
@@ -195,13 +195,13 @@ class ShellTests(unittest.TestCase):
         self.assertIn("pointer-events: none", css)
 
     def test_version_is_consistent(self):
-        self.assertIn('const VERSION = "0.5.0";', SHELL)
-        self.assertIn("jamshell 0.5.0:", SHELL)
+        self.assertIn('const VERSION = "0.7.0";', SHELL)
+        self.assertIn("jamshell 0.7.0:", SHELL)
         readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
-        self.assertIn("0.5.0", readme)
+        self.assertIn("0.7.0", readme)
 
     def test_portrait_stage_and_touch(self):
-        self.assertIn("const W = 720, H = 1280;", SHELL)
+        self.assertIn("{ w: 720, h: 1280, landscape: false }", SHELL)
         self.assertIn("touch-action: none", SHELL)
         self.assertRegex(SHELL, r'name="viewport" content="width=device-width')
 
@@ -214,7 +214,7 @@ class ShellTests(unittest.TestCase):
     def test_credits_and_licence(self):
         self.assertIn("Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude)", SHELL)
         self.assertIn("Apache-2.0", SHELL)
-        self.assertNotIn("MIT", SHELL)
+        self.assertNotIn("M" + "IT", SHELL)
 
     def test_selftest_prints_the_pass_line(self):
         self.assertIn('"No problems found."', SHELL)
@@ -269,6 +269,111 @@ class LanguageKitTests(unittest.TestCase):
         saves = {s.get("save") for s in spec["steps"]}
         for name in ("lang_default", "lang_button", "lang_french", "lang_back"):
             self.assertIn(name, saves)
+
+
+class LandscapeTests(unittest.TestCase):
+    """jamshell 0.6.0: a page may ask for a landscape stage (1280x720); portrait stays the default."""
+
+    def test_stage_size_is_read_from_the_page(self):
+        shell = SHELL[:SHELL.index("// DEMO (replace in a jam game)")]
+        self.assertIn("function stageSize(asked) {", shell)
+        self.assertIn("document.querySelector('meta[name=\"jamshell-stage\"]')", shell)
+        self.assertIn("const W = STAGE.w, H = STAGE.h;", shell)
+        self.assertIn("{ w: 720, h: 1280, landscape: false }", shell)
+        self.assertIn("{ w: 1280, h: 720, landscape: true }", shell)
+        self.assertIn('document.body.classList.toggle("landscape", STAGE.landscape);', shell)
+
+    def test_the_shell_itself_stays_portrait(self):
+        head = SHELL[:SHELL.index("</head>")]
+        # the head mentions the tag only inside the header comment, so the shell as shipped is portrait
+        outside = head[:head.index("<!--")] + head[head.index("-->") + 3:]
+        self.assertNotIn("jamshell-stage", outside)
+
+    def test_landscape_css_packs_the_screens(self):
+        css = SHELL[SHELL.index("<style>"):SHELL.index("</style>")]
+        for rule in ("body.landscape .layer {", "body.landscape .btn.card {", "body.landscape #chooseList {"):
+            self.assertIn(rule, css)
+        cards = css[css.index("body.landscape #chooseList {"):]
+        self.assertIn("flex-wrap: wrap", cards[:cards.index("}")])
+
+    def test_vignette_covers_both_orientations(self):
+        self.assertIn("const M = Math.max(W, H), g = c.createRadialGradient(", SHELL)
+
+    def test_landscape_steps_are_valid(self):
+        spec = json.load(open(os.path.join(HERE, "steps-landscape.json"), encoding="utf-8"))
+        self.assertEqual(playcheck.check_steps(spec), [])
+        by_save = {s.get("save"): s for s in spec["steps"] if s.get("save")}
+        self.assertEqual(by_save["stage_size"]["expect"], "1280x720 true")
+        for name in ("title_fits", "centre_tap", "cards_fit", "picked_card", "paused_fits", "over_fits"):
+            self.assertIn(name, by_save)
+        # a sideways window and an upright one, so both ways of letterboxing are played
+        self.assertEqual({v["width"] > v["height"] for v in spec["viewports"]}, {True, False})
+
+    def test_readme_says_how(self):
+        readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+        self.assertIn('<meta name="jamshell-stage" content="landscape">', readme)
+
+
+class LevelKitTests(unittest.TestCase):
+    """jamshell 0.7.0: the level kit (text maps, a fitted grid, saved progress, undo, restart, the Levels screen)."""
+
+    def test_kit_is_in_the_shell(self):
+        shell = SHELL[:SHELL.index("// DEMO (replace in a jam game)")]
+        for name in ("function parseLevel(", "function fitGrid(", "function keyDir(", "function moveBox(",
+                     "const DIRS = {", "const levels = {", "remember() {", "undo() {", "win() {", "menu() {"):
+            self.assertIn(name, shell)
+
+    def test_screens_and_buttons(self):
+        self.assertIn('<div id="levels" class="layer hidden"', SHELL)
+        for button in ("levelsBtn", "undoBtn", "restartBtn"):
+            self.assertIn('<button id="%s" class="btn small hidden"' % button, SHELL)
+        self.assertIn('for (const id of ["title", "paused", "over", "choose", "levels"])', SHELL)
+        self.assertIn('name !== "choose" && name !== "won"', SHELL)
+
+    def test_level_keys_come_before_the_game(self):
+        keys = SHELL[SHELL.index('addEventListener("keydown"'):SHELL.index('addEventListener("keyup"')]
+        self.assertLess(keys.index("levels.key(e.key)"), keys.index("Game.onKey(e.key)"))
+        self.assertIn("levels.count && levels.key(e.key)", keys)
+
+    def test_play_goes_to_the_next_level(self):
+        start = SHELL[SHELL.index("function start(at) {"):SHELL.index("function pause()")]
+        self.assertIn('levels.go(typeof at === "number" ? at : levels.next())', start)
+        self.assertIn("Game.start(rng(Date.now() & 0xffffffff))", start)
+
+    def test_level_list_is_text_not_html(self):
+        menu = SHELL[SHELL.index("  menu() {"):SHELL.index("  setup() {")]
+        self.assertNotIn("innerHTML", menu)
+        self.assertIn("b.disabled = !this.isOpen(i);", menu)
+
+    def test_progress_is_saved_per_page(self):
+        self.assertIn('store.get("levels", [])', SHELL)
+        self.assertIn('store.set("levels",', SHELL)
+
+    def test_example_keeps_the_shell(self):
+        ex = open(os.path.join(HERE, "examples", "levels.html"), encoding="utf-8").read()
+        cut, tail = "const Game = {", "// ---------------------------------------- end of DEMO"
+        self.assertEqual(ex[:ex.index(cut)], SHELL[:SHELL.index(cut)])
+        self.assertEqual(ex[ex.index(tail):], SHELL[SHELL.index(tail):])
+        game = ex[ex.index(cut):ex.index(tail)]
+        for member in ("levels: [", "load(i, level)", "snapshot()", "restore(s)", "levels.remember()", "levels.win()",
+                       "tests(check)"):
+            self.assertIn(member, game)
+        self.assertNotIn("M" + "IT", ex)
+
+    def test_level_steps_are_valid(self):
+        spec = json.load(open(os.path.join(HERE, "steps-levels.json"), encoding="utf-8"))
+        self.assertEqual(playcheck.check_steps(spec), [])
+        by_save = {s.get("save"): s for s in spec["steps"] if s.get("save")}
+        for name in ("levels_button", "title_fits", "first_level", "undo_key", "undo_button", "hud_fits", "hud_order",
+                     "restart_button", "won", "next_level", "pushed", "open_levels", "levels_fit", "picked_level",
+                     "levels_escape"):
+            self.assertIn(name, by_save)
+        self.assertEqual(by_save["open_levels"]["expect"], "110")
+
+    def test_readme_says_how(self):
+        readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+        self.assertIn("## Level kit (0.7.0)", readme)
+        self.assertIn("examples/levels.html", readme)
 
 
 if __name__ == "__main__":

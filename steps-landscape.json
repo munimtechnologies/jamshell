@@ -1,0 +1,37 @@
+{
+  "selftest": {"hash": "#selftest", "text": "No problems found.", "timeout_ms": 30000},
+  "viewports": [
+    {"name": "desktop", "width": 1280, "height": 720},
+    {"name": "phone-wide", "width": 844, "height": 390, "touch": true},
+    {"name": "phone-tall", "width": 390, "height": 844, "touch": true}
+  ],
+  "steps": [
+    {"wait": 600},
+    {"shot": "title"},
+    {"eval": "W + 'x' + H + ' ' + document.body.classList.contains('landscape')", "save": "stage_size", "expect": "1280x720 true"},
+    {"eval": "(sel => { const s = $('stage').getBoundingClientRect(), c = $('credits').getBoundingClientRect(); return [...document.querySelectorAll(sel)].every(e => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= s.left - 1 && r.right <= s.right + 1 && r.top >= s.top - 1 && r.bottom <= c.top + 1); }); })('#title > *')", "save": "title_fits", "expect": true},
+    {"click": "#playBtn", "after": 300},
+    {"eval": "scene", "expect": "play"},
+    {"tap": [0.5, 0.5], "after": 100},
+    {"eval": "!!Game.lastTap && Math.round(Game.lastTap.x) === 640 && Math.round(Game.lastTap.y) === 360", "save": "centre_tap", "expect": true},
+    {"eval": "choose('Level up!', [{label: 'Faster', detail: '+20% speed'}, {label: 'Bigger', detail: '+20% size'}, {label: 'Heal', detail: 'one more life'}, {label: 'Magnet', detail: 'pulls the stars in'}], i => { window.picked = i; })", "expect": true},
+    {"wait": 200},
+    {"shot": "choose"},
+    {"eval": "(sel => { const s = $('stage').getBoundingClientRect(), c = $('credits').getBoundingClientRect(); return [...document.querySelectorAll(sel)].every(e => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= s.left - 1 && r.right <= s.right + 1 && r.top >= s.top - 1 && r.bottom <= c.top + 1); }); })('#choose > *, #chooseList button')", "save": "cards_fit", "expect": true},
+    {"click": "#chooseList button >> nth=3", "after": 200},
+    {"eval": "window.picked", "save": "picked_card", "expect": 3},
+    {"eval": "scene", "expect": "play"},
+    {"click": "#pauseBtn", "after": 200},
+    {"eval": "scene", "expect": "paused"},
+    {"eval": "(sel => { const s = $('stage').getBoundingClientRect(), c = $('credits').getBoundingClientRect(); return [...document.querySelectorAll(sel)].every(e => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= s.left - 1 && r.right <= s.right + 1 && r.top >= s.top - 1 && r.bottom <= c.top + 1); }); })('#paused > *')", "save": "paused_fits", "expect": true},
+    {"shot": "paused"},
+    {"click": "#resumeBtn", "after": 200},
+    {"eval": "scene", "expect": "play"},
+    {"eval": "new Promise(done => { const t0 = Date.now(); (function poll() { if (scene === 'over' || Date.now() - t0 > 300000) { window.idleWait = Math.round((Date.now() - t0) / 1000); done(scene); } else setTimeout(poll, 250); })(); })", "save": "scene_after_idle", "expect": "over"},
+    {"eval": "window.idleWait", "save": "idle_wait_s"},
+    {"eval": "(sel => { const s = $('stage').getBoundingClientRect(), c = $('credits').getBoundingClientRect(); return [...document.querySelectorAll(sel)].every(e => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= s.left - 1 && r.right <= s.right + 1 && r.top >= s.top - 1 && r.bottom <= c.top + 1); }); })('#over > *')", "save": "over_fits", "expect": true},
+    {"shot": "over"},
+    {"click": "#menuBtn", "after": 300},
+    {"eval": "scene", "expect": "title"}
+  ]
+}
