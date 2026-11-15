@@ -1,6 +1,6 @@
 ---
 name: jamshell
-description: Build a portrait, touch-first browser game for a game jam as one offline HTML file with jamshell (720x1280 stage, one input path for mouse/touch/keys, title/pause/game-over screens, sound, music, juice, touch stick, self-test, headless playtest and an itch.io packager). Use when an agent must make a small HTML5 jam game fast, test it without a human, and upload it to itch.io.
+description: Build a touch-first browser game for a game jam as one offline HTML file with jamshell (portrait 720x1280 or landscape 1280x720 stage, an optional level kit for puzzles and platformers, one input path for mouse/touch/keys, title/pause/game-over screens, sound, music, juice, touch stick, self-test, headless playtest and an itch.io packager). Use when an agent must make a small HTML5 jam game fast, test it without a human, and upload it to itch.io.
 license: Apache-2.0
 ---
 
@@ -14,7 +14,7 @@ made with AI agents (Anthropic Claude), and its credits strip says so.
 ## When to use
 
 - A timed jam (itch.io or similar) wants a browser-playable game and you have hours, not weeks.
-- The game is 2D, plays in one screen, and should work on phones (touch) and desktops (mouse, keys).
+- The game is 2D and plays in one screen: portrait for phones, landscape (one tag) for desktop-first jams.
 - You need to test it headlessly: a self-test, a scripted playtest with screenshots, and a zip that
   passes itch.io's limits.
 
@@ -24,7 +24,7 @@ Not for: 3D games, multi-scene games with heavy assets, or engines such as Godot
 
 1. Get the kit and check it runs (Python 3.10+):
    ```sh
-   git clone --depth 1 https://github.com/munimtechnologies/jamshell
+   git clone --depth 1 --branch v0.7.0 https://github.com/munimtechnologies/jamshell
    cd jamshell
    python -m unittest -v test_jamshell.py test_package.py test_framewalk.py test_langleak.py
    ```
@@ -91,11 +91,27 @@ Keep anything the player must see or tap above `H - SAFE_BOTTOM` (the credits st
   `choose(title, [{ label, detail }], i => ...)` for a pick-one card screen (opens only during play).
 - Other: `rng(seed)`, `store.get(key, fallback)` / `store.set(key, value)`, `toast(text)`.
 
+## Landscape stage (0.6.0+)
+
+Put `<meta name="jamshell-stage" content="landscape">` in the head of your copy. The stage becomes 1280x720 and
+`W`/`H` follow; the screens are packed for the wider shape and the window still letterboxes. Playtest with the
+repo's `steps-landscape.json` (desktop, phone sideways, phone upright). On itch.io set the viewport to 1280 x 720.
+
+## Level kit (0.7.0+)
+
+For hand-made levels (puzzles, mazes, platformers): give the game object `levels: [{ name, map: [...rows] }]`,
+`load(i, level)`, and optionally `snapshot()` / `restore(s)` (plain JSON; turns on undo). Call
+`levels.remember()` before each move and `levels.win()` when the level is solved. The shell adds a Levels screen
+(later levels open as earlier ones are cleared, progress saved per page), Undo / Restart buttons and keys (R; Z, U
+or Backspace), level banners and an all-clear screen. Helpers: `parseLevel(rows)` (`at`, `set`, `find`, `all`,
+`rows`), `fitGrid(w, h)` (`centre`, `cellAt`), `DIRS`, `keyDir`, `moveBox`. See `examples/levels.html` and its
+playtest `steps-levels.json`.
+
 ## Example game
 
 "Star Catch": move a basket with the keys or the touch stick, catch stars, avoid rocks. Paste it in
 place of the DEMO game object and put your own name in its `credits`. This exact block is spliced into
-jamshell 0.5.1 and checked by the self-test, the playtest below and the packager before each release of
+jamshell 0.7.0 and checked by the self-test, the playtest below and the packager before each release of
 this skill.
 
 ```js example-game
