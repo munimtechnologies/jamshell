@@ -1,0 +1,153 @@
+<!doctype html>
+<!--
+  jamshell platform kit demo (examples/platform.html). A sandbox for the kit, not a game.
+  Made by MV2 of Munim, Inc. with AI agents (Anthropic Claude). Licence: Apache-2.0.
+  Open this file in a browser. #selftest runs a short scripted check and prints the result.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jamshell platform kit demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1726; color: #eee; font: 15px system-ui, sans-serif; }
+  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { background: #201c30; max-width: 100vw; max-height: 100vh; aspect-ratio: 16 / 9; width: 100vw; }
+  #out { position: fixed; left: 8px; bottom: 6px; font-size: 13px; opacity: .85; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1280" height="720"></canvas></div>
+<div id="out"></div>
+<script src="../kits/platform.js"></script>
+<script>
+"use strict";
+var W = 1280, H = 720, T = 32;
+var MAP = [
+  "########################################################",
+  "#......................................................#",
+  "#......................................................#",
+  "#..............................=====...................#",
+  "#......................................................#",
+  "#...........######.....................................#",
+  "#......................................######..........#",
+  "#..................................................^^..#",
+  "#.......====...................................#########",
+  "#......................................................#",
+  "#.............................#####....................#",
+  "#......................................................#",
+  "#...........................................=====......#",
+  "#..P...........^^^^....................................#",
+  "#......#####...####....................................#",
+  "#......................................................#",
+  "#..............................................########",
+  "#...............................###....................#",
+  "#......................................................#",
+  "#......................................................#",
+  "########################################################"
+];
+var ctx = document.getElementById("c").getContext("2d");
+var out = document.getElementById("out");
+var wd = Platform.world(MAP, T);
+var spawn = wd.centre(wd.find("P")[0]);
+var me = Platform.body({ x: spawn.x - 12, y: spawn.y - 15 });
+var cam = { x: 0, y: 0 };
+var tick = Platform.ticker(1 / 120);
+var keys = {};
+var gravities = [Platform.DOWN, Platform.RIGHT, Platform.UP, Platform.LEFT], gi = 0;
+var rec = null, ghostFrames = null, ghost = null, ghostPlay = null;
+var events = [], hurtFlash = 0;
+
+function reset() {
+  me = Platform.body({ x: spawn.x - 12, y: spawn.y - 15 });
+  gi = 0;
+}
+function input() {
+  var vertical = me.g.x === 0;
+  var a = vertical ? ((keys.ArrowRight || keys.d ? 1 : 0) - (keys.ArrowLeft || keys.a ? 1 : 0))
+                   : ((keys.ArrowDown || keys.s ? 1 : 0) - (keys.ArrowUp || keys.w ? 1 : 0));
+  return { move: a, jump: !!(keys[" "] || keys.z || keys.k), drop: !!(keys.x) };
+}
+addEventListener("keydown", function (e) {
+  if (e.repeat) return;
+  keys[e.key] = true;
+  if (e.key === "g") { gi = (gi + 1) % 4; Platform.setGravity(me, gravities[gi]); }
+  if (e.key === "1") Platform.resize(wd, me, 0.5);
+  if (e.key === "2") Platform.resize(wd, me, 1);
+  if (e.key === "3") Platform.resize(wd, me, 2);
+  if (e.key === "r") reset();
+  if (e.key === "t") toggleRecord();
+  if (e.key === " " || e.key.indexOf("Arrow") === 0) e.preventDefault();
+});
+addEventListener("keyup", function (e) { keys[e.key] = false; });
+
+function toggleRecord() {
+  if (!rec) { rec = { r: Platform.recorder(), start: Platform.snap(me) }; return; }
+  ghostFrames = { frames: rec.r.frames, start: rec.start };
+  rec = null;
+  startGhost();
+}
+function startGhost() {
+  ghost = Platform.restore(Platform.body(), ghostFrames.start);
+  ghostPlay = Platform.replayer(ghostFrames.frames);
+}
+
+function update(dt) {
+  var inp = input();
+  if (rec) rec.r.push(inp);
+  var ev = Platform.step(wd, me, inp, dt);
+  if (ev.indexOf("hurt") >= 0 || ev.indexOf("out") >= 0) { hurtFlash = 0.3; reset(); }
+  if (ghost) {
+    var gi2 = ghostPlay.next();
+    if (gi2) Platform.step(wd, ghost, gi2, dt); else startGhost();
+  }
+  events = ev.length ? ev : events;
+}
+
+function draw() {
+  Platform.follow(cam, me, W, H, wd, 0.12);
+  ctx.clearRect(0, 0, W, H);
+  Platform.drawTiles(ctx, wd, cam, W, H);
+  if (ghost) {
+    ctx.fillStyle = "rgba(140,200,255,.45)";
+    ctx.fillRect(ghost.x - cam.x, ghost.y - cam.y, ghost.w, ghost.h);
+  }
+  ctx.fillStyle = hurtFlash > 0 ? "#ff8080" : "#ffd36e";
+  ctx.fillRect(me.x - cam.x, me.y - cam.y, me.w, me.h);
+  ctx.fillStyle = "#eee";
+  ctx.font = "18px system-ui, sans-serif";
+  ctx.fillText("move: arrows/WASD  jump: space/Z  drop: X  gravity: G  size: 1 2 3  record ghost: T  reset: R", 16, 28);
+  ctx.fillText("gravity " + ["down", "right", "up", "left"][gi] + "  size x" + me.scale +
+    (me.grounded ? "  grounded" : "") + (rec ? "  RECORDING" : "") + "  last: " + events.join(","), 16, 54);
+  ctx.fillText("Made by MV2 of Munim, Inc. with AI agents. Kit: Apache-2.0.", 16, H - 14);
+}
+
+var last = 0;
+function frame(now) {
+  var dt = Math.min(0.05, last ? (now - last) / 1000 : 0);
+  last = now;
+  hurtFlash = Math.max(0, hurtFlash - dt);
+  tick(dt, update);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function selftest() {
+  var problems = [];
+  function check(ok, what) { if (!ok) problems.push(what); }
+  check(Platform.VERSION === "0.1.0", "kit version");
+  var b = Platform.body({ x: spawn.x - 12, y: spawn.y - 15 });
+  for (var i = 0; i < 240; i++) Platform.step(wd, b, {}, 1 / 120);
+  check(b.grounded && b.y === 20 * T - 30, "spawn falls to the bottom floor (row 20)");
+  var x0 = b.x;
+  for (i = 0; i < 60; i++) Platform.step(wd, b, { move: 1 }, 1 / 120);
+  check(b.x > x0 + 50, "walks right");
+  check(Platform.resize(wd, b, 2) && b.h === 60, "grows to x2");
+  out.textContent = problems.length ? "Problems: " + problems.join("; ") : "No problems found.";
+}
+
+if (location.hash === "#selftest") selftest();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
